@@ -1,0 +1,56 @@
+--- 
+
+author: Noah Jones
+title: CDT01 Application
+date: 
+
+---
+
+# CDT01 Application
+
+## Background
+
+This is a proof of concept or first experiment in generating the application.
+
+## Compliance Considerations
+
+## Plan
+
+### Product
+
+ 1. Databasing
+ 2. Smart contract
+ 3. Plutus Application Backend
+ 4. Wallet Integration
+
+### Materials
+
+| Name | Cat # | Lot | Size | Quantity |
+|:-----|:------|:----|:-----|:---------|
+|      |       |     |      |          |
+
+### Links
+
+[postgres](https://www.youtube.com/watch?v=Cio3kOEdai0)
+
+### Schedule
+
+## Cost
+
+## Progress
+
+### Results
+
+### Tasks
+
+ - [ ] Haskell interface with DB2.
+
+### Log
+
+20210808134828NJ I am figuring out the databasing of the things.
+
+20210808172721NJ I studied how to use PostgreSQL by referencing the postgresql-13-US.pdf file. I set up a scheme according to [this Quora answer](https://www.quora.com/Does-banks-store-money-in-SQL?share=1). 
+
+20210808172921NJ I just found a post that recommends an IBM mainframe with the DB2 database system and cites that this is what most banks around the world use.
+
+20210808175830NJ DB2 uses SQL language, so it should be fine. 

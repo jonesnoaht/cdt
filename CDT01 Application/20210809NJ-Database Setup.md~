@@ -1,0 +1,54 @@
+--- 
+
+author: Noah Jones
+title: 20210809NJ-Database Setup
+date: 2021-08-09
+
+---
+
+# 20210809NJ-Database Setup
+
+## Background
+
+## Compliance Considerations
+
+## Plan
+
+### Materials
+
+| Name | Cat # | Lot | Size | Quantity |
+|:-----|:------|:----|:-----|:---------|
+|      |       |     |      |          |
+
+[cabal](https://downloads.haskell.org/~cabal/Cabal-1.24.1.0/doc/users-guide/developing-packages.html)
+
+### Schedule
+
+## Cost
+
+## Progress
+
+### Results
+
+### Tasks
+
+### Log
+
+20210809101438NJ Using [this](https://www.youtube.com/watch?v=Cio3kOEdai0) resource. `postgres -D /usr/local/var/postgres`
+
+20210809102148NJ See code below
+
+```{bash}
+openssl req -new -x509 -days 365 -nodes -text -out server.crt \
+	-keyout server.key -subj "/CN=Noah-MBP.local"
+	
+chmod og-rwx server.key
+```
+
+Port 5432
+
+20210809105112NJ Figuring out the code. I think [this](https://github.com/input-output-hk/cardano-db-sync/blob/master/cardano-db-tool/src/Cardano/Db/Tool/Report/Balance.hs) and [this](https://github.com/input-output-hk/cardano-db-sync/blob/master/doc/interesting-queries.md) are what I have been looking for.
+
+20210809105513NJ [Here](https://github.com/input-output-hk/plutus/blob/master/plutus-pab-client/pab-demo-scripts.nix) is an example that uses sqlite3.
+
+20210809110709NJ The client is also the frontend tool. Instructions for getting started are [here](https://github.com/input-output-hk/plutus/tree/master/plutus-pab). 

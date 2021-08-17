@@ -1,0 +1,10 @@
+cradle:
+  cabal:
+    - path: "./src"
+      component: "lib:CDT"
+    - path: "./app/CDT-oracle-pab.hs"
+      component: "exe:CDT-oracle-pab"
+    - path: "./app/CDT-oracle-client.hs"
+      component: "exe:CDT-oracle-client"
+    - path: "./app/CDT-swap-client.hs"
+      component: "exe:CDT-swap-client"
