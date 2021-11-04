@@ -8,12 +8,25 @@ date: 2021-08-08
 
 # Certificate of Deposit Token
 
-Document your use case if not already done so
-What type of solution do you want to build on PRISM
-What vertical interests you?
-What type of credentials will be issued?
-Who is the Holder? What is the value of the credential to the holder?
-Who will be the Issuer / Who will the Verifier
+> Document your use case if not already done so
+
+Banks should be able to verify the credentials of account holders (especially large accounts). The Oracle needs to be able to verify the credentials of the NCUA and FDIC. 
+
+> What type of solution do you want to build on PRISM
+
+
+
+> What vertical interests you?
+
+
+
+> What type of credentials will be issued?
+
+
+> Who is the Holder? What is the value of the credential to the holder?
+
+
+> Who will be the Issuer / Who will the Verifier
 
 ## Compliance
 
