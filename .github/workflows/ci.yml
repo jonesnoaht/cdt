@@ -1,0 +1,211 @@
+# CI for the Certificate of Deposit Token (CDT) monorepo.
+#
+# Sibling units (onchain/, offchain/*, bank-sim/, credentials/, docs/) are being
+# added in parallel branches, so every job guards its steps with a runtime
+# existence check and skips gracefully when the directory is not present yet.
+#
+# Why step-level `if:` on a shell existence check instead of job-level
+# `hashFiles()` guards: `hashFiles()` is evaluated on the runner against the
+# checked-out workspace, but a job-level `if:` is evaluated BEFORE any steps run
+# (i.e. before actions/checkout), where the workspace is empty — so a job-level
+# `hashFiles('onchain/**')` guard would always see nothing and skip the job even
+# when the files exist. Checking with `test -f`/`test -d` in a first step after
+# checkout, exporting the result via $GITHUB_OUTPUT, and gating later steps on
+# that output works in every context.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Cancel superseded runs on PR refs only. Pushes to main must never cancel
+  # the previous commit's in-flight run, or rapid merges leave merged commits
+  # with a "cancelled" instead of a pass/fail verdict.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Single source of truth for the Aiken toolchain, used by both the onchain
+  # job and offchain/demo's vendored build — keeps the two pins from drifting.
+  AIKEN_VERSION: v1.1.23
+
+jobs:
+  aiken:
+    name: aiken (onchain)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for onchain project
+        id: check
+        run: |
+          if test -f onchain/aiken.toml; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "onchain/aiken.toml not found — skipping Aiken checks"
+          fi
+
+      - name: Install Aiken
+        if: steps.check.outputs.exists == 'true'
+        uses: aiken-lang/setup-aiken@v1
+        with:
+          version: ${{ env.AIKEN_VERSION }}
+
+      - name: aiken fmt --check (advisory)
+        if: steps.check.outputs.exists == 'true'
+        working-directory: onchain
+        run: aiken fmt --check
+        continue-on-error: true
+
+      - name: aiken check
+        if: steps.check.outputs.exists == 'true'
+        working-directory: onchain
+        run: aiken check
+
+      - name: aiken build
+        if: steps.check.outputs.exists == 'true'
+        working-directory: onchain
+        run: aiken build
+
+  node:
+    name: node (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - offchain/cdt-txlib
+          - offchain/oracle-watcher
+          - offchain/demo
+          - bank-sim
+          - credentials
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for package
+        id: check
+        run: |
+          if test -f "${{ matrix.package }}/package.json"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "${{ matrix.package }}/package.json not found — skipping"
+          fi
+          if test -f "${{ matrix.package }}/package-lock.json"; then
+            echo "lockfile=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "lockfile=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # `cache: npm` fails when cache-dependency-path matches no file, and
+      # setup-node skips cache setup entirely when the `cache` input is empty,
+      # so enable the npm cache only when the package's lockfile exists.
+      - name: Set up Node 22
+        if: steps.check.outputs.exists == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: ${{ steps.check.outputs.lockfile == 'true' && 'npm' || '' }}
+          cache-dependency-path: ${{ matrix.package }}/package-lock.json
+
+      # offchain/demo's `pretest` runs `aiken build` in its vendored Aiken
+      # project, so the demo job needs the Aiken toolchain too.
+      - name: Install Aiken (offchain/demo pretest builds vendored project)
+        if: steps.check.outputs.exists == 'true' && matrix.package == 'offchain/demo'
+        uses: aiken-lang/setup-aiken@v1
+        with:
+          version: ${{ env.AIKEN_VERSION }}
+
+      # Packages are expected to commit package-lock.json (npm ci), but fall
+      # back to npm install instead of hard-failing on EUSAGE if one lands
+      # without a lockfile.
+      - name: Install dependencies
+        if: steps.check.outputs.exists == 'true'
+        working-directory: ${{ matrix.package }}
+        run: |
+          if test -f package-lock.json; then
+            npm ci
+          else
+            echo "No package-lock.json — falling back to npm install"
+            npm install
+          fi
+
+      - name: Start Postgres and seed (bank-sim)
+        if: steps.check.outputs.exists == 'true' && matrix.package == 'bank-sim'
+        working-directory: bank-sim
+        run: |
+          docker compose up -d --wait
+          npm run seed
+
+      - name: Start Postgres (oracle-watcher)
+        if: steps.check.outputs.exists == 'true' && matrix.package == 'offchain/oracle-watcher'
+        working-directory: offchain/oracle-watcher
+        run: docker compose -f test/docker-compose.yml up -d --wait
+
+      - name: npm test
+        if: steps.check.outputs.exists == 'true'
+        working-directory: ${{ matrix.package }}
+        run: npm test
+
+      - name: npm run demo
+        if: steps.check.outputs.exists == 'true' && matrix.package == 'offchain/demo'
+        working-directory: offchain/demo
+        run: npm run demo
+
+      - name: Tear down Postgres (bank-sim)
+        if: always() && steps.check.outputs.exists == 'true' && matrix.package == 'bank-sim'
+        working-directory: bank-sim
+        run: docker compose down -v
+
+      - name: Tear down Postgres (oracle-watcher)
+        if: always() && steps.check.outputs.exists == 'true' && matrix.package == 'offchain/oracle-watcher'
+        working-directory: offchain/oracle-watcher
+        run: docker compose -f test/docker-compose.yml down -v
+
+  docs:
+    name: docs (markdownlint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for docs
+        id: check
+        run: |
+          if test -d docs; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "docs/ not found — skipping markdown lint"
+          fi
+
+      # Gated on docs/ existing: the docs unit ships docs/*.md together with a
+      # lint-clean README.md, so docs/ appearing is the signal that README is
+      # ready to lint. The pre-existing README on main currently VIOLATES
+      # MD009, MD012, MD025, MD028 and MD007 — all of which stay ENABLED here
+      # (only MD013/MD033/MD041 are disabled) — so linting it before the docs
+      # unit lands would break CI. Whichever PR introduces docs/ must also make
+      # README.md pass this config.
+      # The config file is generated at runtime in $RUNNER_TEMP; its name must
+      # end in `.markdownlint.jsonc` for markdownlint-cli2 to accept it. The
+      # CLI version is pinned so new default-on markdownlint rules cannot start
+      # failing CI without a repo change.
+      - name: Lint markdown (README.md + docs/**/*.md)
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          config="$RUNNER_TEMP/ci.markdownlint.jsonc"
+          cat > "$config" <<'EOF'
+          {
+            "default": true,
+            "MD013": false,
+            "MD033": false,
+            "MD041": false
+          }
+          EOF
+          npx --yes markdownlint-cli2@0.23.0 --config "$config" "README.md" "docs/**/*.md"
