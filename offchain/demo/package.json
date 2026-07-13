@@ -1,0 +1,27 @@
+{
+  "name": "@cdt/demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "CDT flagship demo: full narrated certificate-of-deposit token lifecycle on a local Lucid emulator",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build:onchain": "node scripts/build-onchain.mjs",
+    "pretest": "npm run build:onchain",
+    "predemo": "npm run build:onchain",
+    "test": "vitest run",
+    "demo": "tsx src/demo.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lucid-evolution/lucid": "^0.4.29"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0"
+  }
+}
