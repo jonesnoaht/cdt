@@ -1,0 +1,38 @@
+{
+  "name": "@cdt/txlib",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Off-chain transaction library for the Certificate of Deposit Token (CDT): Plutus data schemas, interest math mirror, and Lucid Evolution transaction builders.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepare": "npm run build",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lucid-evolution/lucid": "^0.4.29"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "fast-check": "^4.1.1",
+    "typescript": "^5.5.4",
+    "vitest": "^3.1.1"
+  }
+}
