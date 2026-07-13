@@ -1,0 +1,17 @@
+name: cdt-oracle-watcher-test
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: cdt-oracle-watcher-db
+    environment:
+      POSTGRES_USER: cdt
+      POSTGRES_PASSWORD: cdt
+      POSTGRES_DB: cdt_bank
+    ports:
+      - "55433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cdt -d cdt_bank"]
+      interval: 1s
+      timeout: 5s
+      retries: 60
