@@ -1,0 +1,7 @@
+# NEVER commit private keys or seed phrases. Preview-testnet-only throwaway
+# keys live here, but the rule stands regardless.
+.keys/
+
+node_modules/
+dist/
+*.tsbuildinfo
