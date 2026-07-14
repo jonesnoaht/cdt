@@ -10,16 +10,9 @@
  */
 import {
   Data,
-  Emulator,
-  Lucid,
-  addAssets,
   fromText,
-  generateEmulatorAccount,
-  generateEmulatorAccountFromPrivateKey,
   paymentCredentialOf,
   unixTimeToSlot,
-  type EmulatorAccount,
-  type LucidEvolution,
   type UTxO,
 } from "@lucid-evolution/lucid";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -28,102 +21,25 @@ import {
   buildMintTx,
   buildRedeemTx,
   readVaultDatum,
-  type CDTerms,
   type MintTxResult,
 } from "../src/builders.js";
 import { accrued, fullInterest } from "../src/interest.js";
 import { CDDatum } from "../src/types.js";
 import { fixtureBlueprint } from "./fixtures/alwaysTrue.js";
+import {
+  TERM_MS,
+  holdsUnit,
+  lovelaceAt,
+  mintAndSubmit as mintAndSubmitWith,
+  requiredSigners,
+  setup,
+  vaultUtxoOf,
+  type Ctx,
+} from "./fixtures/harness.js";
 
 const blueprint = fixtureBlueprint();
 
-// Large principal + short term so the interest amounts stay above min-ADA
-// even though the emulator term is only two minutes long.
-const PRINCIPAL = 10_000_000_000_000n; // 10M ADA
-const RATE_BPS = 1_000n; // 10% p.a.
-const PENALTY_BPS = 2_000n; // 20% of accrued interest
-const TERM_MS = 120_000n; // 120 slots
-
-interface Ctx {
-  emulator: Emulator;
-  lucid: LucidEvolution;
-  member: EmulatorAccount;
-  oracle: EmulatorAccount;
-  issuer: EmulatorAccount;
-  oracleVkh: string;
-  terms: CDTerms;
-}
-
-async function setup(): Promise<Ctx> {
-  const member = generateEmulatorAccount({ lovelace: 30_000_000_000_000n });
-  const oracle = generateEmulatorAccountFromPrivateKey({
-    lovelace: 100_000_000n,
-  });
-  const issuer = generateEmulatorAccount({ lovelace: 100_000_000n });
-  const emulator = new Emulator([member, oracle, issuer]);
-  const lucid = await Lucid(emulator, "Custom");
-  lucid.selectWallet.fromSeed(member.seedPhrase);
-  const oracleVkh = paymentCredentialOf(oracle.address).hash;
-  const issuerVkh = paymentCredentialOf(issuer.address).hash;
-  const start = BigInt(emulator.now());
-  const terms: CDTerms = {
-    issuer: issuerVkh,
-    depositId: fromText("cd-deposit-0001"),
-    principal: PRINCIPAL,
-    rateBps: RATE_BPS,
-    start,
-    maturity: start + TERM_MS,
-    penaltyBps: PENALTY_BPS,
-  };
-  return { emulator, lucid, member, oracle, issuer, oracleVkh, terms };
-}
-
-async function mintAndSubmit(ctx: Ctx): Promise<MintTxResult> {
-  const result = await buildMintTx(ctx.lucid, {
-    blueprint,
-    oracleVkh: ctx.oracleVkh,
-    ownerAddress: ctx.member.address,
-    terms: ctx.terms,
-  });
-  const memberWitness = await result.tx.partialSign.withWallet();
-  const oracleWitness = await result.tx.partialSign.withPrivateKey(
-    ctx.oracle.privateKey,
-  );
-  const signed = await result.tx
-    .assemble([memberWitness, oracleWitness])
-    .complete();
-  await signed.submit();
-  ctx.emulator.awaitBlock(1);
-  return result;
-}
-
-function requiredSigners(tx: MintTxResult["tx"]): string[] {
-  const list = tx.toTransaction().body().required_signers();
-  if (!list) return [];
-  const out: string[] = [];
-  for (let i = 0; i < list.len(); i++) out.push(list.get(i).to_hex());
-  return out;
-}
-
-async function vaultUtxoOf(ctx: Ctx, result: MintTxResult): Promise<UTxO> {
-  const utxos = await ctx.lucid.utxosAt(result.scripts.vaultAddress);
-  expect(utxos).toHaveLength(1);
-  return utxos[0]!;
-}
-
-async function lovelaceAt(ctx: Ctx, address: string): Promise<bigint> {
-  const utxos = await ctx.lucid.utxosAt(address);
-  return addAssets(...utxos.map((u) => u.assets))["lovelace"] ?? 0n;
-}
-
-async function holdsUnit(
-  ctx: Ctx,
-  address: string,
-  unit: string,
-): Promise<boolean> {
-  const utxos = await ctx.lucid.utxosAt(address);
-  return utxos.some((u) => (u.assets[unit] ?? 0n) > 0n);
-}
+const mintAndSubmit = (ctx: Ctx) => mintAndSubmitWith(blueprint, ctx);
 
 describe("buildMintTx", () => {
   let ctx: Ctx;
@@ -131,7 +47,7 @@ describe("buildMintTx", () => {
     ctx = await setup();
   });
 
-  it("builds a submittable oracle-co-signed mint tx that locks principal + full interest", async () => {
+  it("builds a submittable oracle-co-signed mint tx that locks the CDT + principal + full interest in the vault", async () => {
     const result = await buildMintTx(ctx.lucid, {
       blueprint,
       oracleVkh: ctx.oracleVkh,
@@ -172,14 +88,18 @@ describe("buildMintTx", () => {
     await signed.submit();
     ctx.emulator.awaitBlock(1);
 
-    // Vault holds principal + full interest with the inline CDDatum.
+    // Vault holds the CDT + principal + full interest with the inline
+    // CDDatum (the real cdt_mint policy requires the token INSIDE the vault
+    // output).
     const vaultUtxo = await vaultUtxoOf(ctx, result);
     expect(vaultUtxo.assets["lovelace"]).toBe(result.lockedLovelace);
+    expect(vaultUtxo.assets[result.unit]).toBe(1n);
     expect(vaultUtxo.datum).toBeDefined();
     expect(Data.from(vaultUtxo.datum!, CDDatum)).toEqual(result.datum);
 
-    // The member holds the freshly minted CDT.
-    expect(await holdsUnit(ctx, ctx.member.address, result.unit)).toBe(true);
+    // The CDT is locked in the vault, NOT paid to the member; ownership is
+    // tracked by the datum's `owner` field.
+    expect(await holdsUnit(ctx, ctx.member.address, result.unit)).toBe(false);
   });
 
   it("reuses pre-resolved scripts when given", async () => {
@@ -376,6 +296,23 @@ describe("buildRedeemTx", () => {
     ).rejects.toThrow(/cdt_policy/);
   });
 
+  it("refuses a vault UTxO that does not hold the CDT", async () => {
+    ctx.emulator.awaitSlot(Number(TERM_MS / 1000n) + 10);
+    const vaultUtxo = await vaultUtxoOf(ctx, minted);
+    const stripped: UTxO = {
+      ...vaultUtxo,
+      assets: { lovelace: vaultUtxo.assets["lovelace"]! },
+    };
+    await expect(
+      buildRedeemTx(ctx.lucid, {
+        blueprint,
+        oracleVkh: ctx.oracleVkh,
+        vaultUtxo: stripped,
+        ownerAddress: ctx.member.address,
+      }),
+    ).rejects.toThrow(/expected exactly 1/);
+  });
+
   it("readVaultDatum rejects out-of-range on-chain datums", () => {
     const hostile: CDDatum = { ...minted.datum, penalty_bps: 20_001n };
     const fakeUtxo: UTxO = {
@@ -536,5 +473,20 @@ describe("buildEarlyWithdrawTx", () => {
         withdrawAt: BigInt(ctx.emulator.now()),
       }),
     ).rejects.toThrow(/does not match the datum's owner/);
+  });
+
+  it("refuses an issuerAddress whose credential is not the datum issuer", async () => {
+    ctx.emulator.awaitSlot(60);
+    const vaultUtxo = await vaultUtxoOf(ctx, minted);
+    await expect(
+      buildEarlyWithdrawTx(ctx.lucid, {
+        blueprint,
+        oracleVkh: ctx.oracleVkh,
+        vaultUtxo,
+        ownerAddress: ctx.member.address,
+        issuerAddress: ctx.member.address,
+        withdrawAt: BigInt(ctx.emulator.now()),
+      }),
+    ).rejects.toThrow(/does not match the datum's issuer/);
   });
 });

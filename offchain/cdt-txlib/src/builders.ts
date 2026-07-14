@@ -1,8 +1,8 @@
 /**
  * Transaction builders for the CDT lifecycle:
  *
- * - {@link buildMintTx}: oracle-attested mint of a CDT + locking of the CD
- *   terms and principal + full interest in the vault;
+ * - {@link buildMintTx}: oracle-attested mint of a CDT, locked in the vault
+ *   together with the CD terms and principal + full interest;
  * - {@link buildRedeemTx}: redemption at/after maturity (burn CDT, pay the
  *   owner principal + full interest);
  * - {@link buildEarlyWithdrawTx}: early withdrawal with penalty (burn CDT,
@@ -76,8 +76,9 @@ export interface CDTerms {
 
 export interface MintTxParams extends CdtScriptParams {
   /**
-   * Owner (member) address. Its payment key hash becomes `CDDatum.owner`
-   * and the freshly minted CDT is paid to it.
+   * Owner (member) address. Its payment key hash becomes `CDDatum.owner`,
+   * which is what tracks ownership of the CD — the freshly minted CDT itself
+   * is locked inside the vault output, as the on-chain policy requires.
    */
   ownerAddress: string;
   terms: CDTerms;
@@ -171,9 +172,11 @@ function coinsPerUtxoByte(lucid: LucidEvolution): bigint {
  * Build the oracle-attested mint transaction:
  *
  * - mints exactly 1 CDT (asset name = `depositId`) with `MintCD { datum }`;
- * - pays `principal + full_interest` lovelace to the vault with the inline
- *   `CDDatum`;
- * - pays the CDT to the owner;
+ * - locks the minted CDT at the vault, together with
+ *   `principal + full_interest` lovelace and the inline `CDDatum` — the
+ *   on-chain policy requires the token INSIDE the vault output (a mint
+ *   paying the CDT anywhere else fails phase-2 validation); ownership is
+ *   tracked by `CDDatum.owner`, not by token custody;
  * - requires the oracle as an extra signatory (the oracle watcher attests
  *   the bank deposit by co-signing).
  *
@@ -226,6 +229,9 @@ export async function buildMintTx(
   const lockedLovelace =
     terms.principal +
     fullInterest(terms.principal, terms.rateBps, terms.start, terms.maturity);
+  // The exact value the vault output must hold — and the one the min-ADA
+  // precheck below must be computed against, or the check under-estimates.
+  const vaultAssets = { lovelace: lockedLovelace, [unit]: 1n };
 
   // Lucid silently raises a below-minimum output to min-ADA (funded from the
   // wallet), which would make the vault hold more than principal + interest
@@ -236,7 +242,7 @@ export async function buildMintTx(
       txHash: "00".repeat(32),
       outputIndex: 0,
       address: scripts.vaultAddress,
-      assets: { lovelace: lockedLovelace },
+      assets: vaultAssets,
       datum: datumCbor,
     },
   );
@@ -253,9 +259,8 @@ export async function buildMintTx(
     .pay.ToContract(
       scripts.vaultAddress,
       { kind: "inline", value: datumCbor },
-      { lovelace: lockedLovelace },
+      vaultAssets,
     )
-    .pay.ToAddress(params.ownerAddress, { [unit]: 1n })
     .addSignerKey(scripts.oracleVkh)
     .complete();
 
@@ -273,8 +278,8 @@ export interface RedeemTxParams extends CdtScriptParams {
   /**
    * Requested lower validity bound (POSIX ms). Defaults to the datum's
    * `maturity`; must be >= it. The bound actually set on the tx is this
-   * value aligned up to the next slot boundary (see module docs). The
-   * wallet must hold the CDT so it can be burned.
+   * value aligned up to the next slot boundary (see module docs). The CDT
+   * to burn comes out of the vault UTxO itself, which locks it since mint.
    */
   validFrom?: bigint;
 }
@@ -310,6 +315,20 @@ export function readVaultDatum(vaultUtxo: UTxO, scripts: CdtScripts): CDDatum {
   return datum;
 }
 
+/**
+ * Assert the vault UTxO holds exactly 1 of the CDT. The mint policy locks
+ * the token inside the vault output, so every genuine CD vault carries it;
+ * anything else is a look-alike UTxO whose burn could not be balanced.
+ */
+function assertVaultHoldsCdt(vaultUtxo: UTxO, unit: Unit): void {
+  const quantity = vaultUtxo.assets[unit] ?? 0n;
+  if (quantity !== 1n) {
+    throw new Error(
+      `vaultUtxo holds ${quantity} of the CDT (${unit}); expected exactly 1 — the mint policy locks the CDT inside the vault output, so this is not a genuine CD vault UTxO`,
+    );
+  }
+}
+
 function assertOwnerAddress(ownerAddress: string, datum: CDDatum): void {
   const cred = paymentCredentialOf(ownerAddress);
   if (cred.type !== "Key" || cred.hash !== datum.owner) {
@@ -319,13 +338,40 @@ function assertOwnerAddress(ownerAddress: string, datum: CDDatum): void {
   }
 }
 
+function assertIssuerAddress(issuerAddress: string, datum: CDDatum): void {
+  const cred = paymentCredentialOf(issuerAddress);
+  if (cred.type !== "Key" || cred.hash !== datum.issuer) {
+    throw new Error(
+      `issuerAddress payment credential (${cred.hash}) does not match the datum's issuer (${datum.issuer}); the on-chain vault credits the remainder only to the issuer's key`,
+    );
+  }
+}
+
+/**
+ * Shared preamble for the vault-spend builders: decode + validate the inline
+ * datum, check the owner address, derive the CDT unit, and assert the vault
+ * UTxO actually holds the token. Any new spend builder must go through this.
+ */
+function prepareVaultSpend(
+  scripts: CdtScripts,
+  vaultUtxo: UTxO,
+  ownerAddress: string,
+): { datum: CDDatum; unit: Unit } {
+  const datum = readVaultDatum(vaultUtxo, scripts);
+  assertOwnerAddress(ownerAddress, datum);
+  const unit = toUnit(datum.cdt_policy, datum.deposit_id);
+  assertVaultHoldsCdt(vaultUtxo, unit);
+  return { datum, unit };
+}
+
 /**
  * Build the at/after-maturity redemption transaction:
  *
  * - spends the vault UTxO with the `Redeem` redeemer;
  * - sets the validity lower bound to `maturity` (or later), aligned up to a
  *   slot boundary so the on-chain bound is never before `maturity`;
- * - burns the CDT with `BurnCD`;
+ * - burns the CDT with `BurnCD` (the token comes out of the vault UTxO,
+ *   where the mint locked it);
  * - pays the owner `principal + full_interest`;
  * - requires the owner's signature.
  */
@@ -334,8 +380,11 @@ export async function buildRedeemTx(
   params: RedeemTxParams,
 ): Promise<RedeemTxResult> {
   const scripts = resolveScripts(lucid, params);
-  const datum = readVaultDatum(params.vaultUtxo, scripts);
-  assertOwnerAddress(params.ownerAddress, datum);
+  const { datum, unit } = prepareVaultSpend(
+    scripts,
+    params.vaultUtxo,
+    params.ownerAddress,
+  );
 
   const requested = params.validFrom ?? datum.maturity;
   if (requested < datum.maturity) {
@@ -345,7 +394,6 @@ export async function buildRedeemTx(
   }
   const lowerBound = ceilToSlotBegin(scripts.network, requested);
 
-  const unit = toUnit(datum.cdt_policy, datum.deposit_id);
   const payout = maturePayout(
     datum.principal,
     datum.rate_bps,
@@ -375,7 +423,11 @@ export interface EarlyWithdrawTxParams extends CdtScriptParams {
    * datum's `owner`.
    */
   ownerAddress: string;
-  /** Address paid the remainder (the issuer / credit union). */
+  /**
+   * Address paid the remainder (the issuer / credit union). Its payment
+   * credential must be the datum's `issuer` — the on-chain vault credits
+   * the remainder only to the issuer's key.
+   */
   issuerAddress: string;
   /**
    * Requested withdrawal time `t` (POSIX ms). The effective time — used
@@ -414,22 +466,34 @@ export interface EarlyWithdrawTxResult {
  *   computes all amounts at that same aligned time, so an on-chain validator
  *   deriving the accrual from the tx's lower bound sees exactly the amounts
  *   paid;
- * - burns the CDT with `BurnCD`;
+ * - burns the CDT with `BurnCD` (the token comes out of the vault UTxO,
+ *   where the mint locked it);
  * - pays the owner `principal + accrued(t) - penalty_fee(t)`;
  * - pays the remaining vault lovelace back to the issuer;
  * - requires the owner's signature.
  *
- * If the remainder is positive but below the issuer output's min-ADA the
- * builder throws (Lucid would otherwise silently raise the output above the
- * true remainder); realistic CD sizes keep the remainder well above it.
+ * Sub-min-ADA remainder: if the issuer remainder is positive but below the
+ * issuer output's min-ADA, the builder REFUSES to build the transaction
+ * (throws) instead of letting Lucid silently top the output up from the
+ * wallet, which would pay the issuer more than the vault owes. The on-chain
+ * vault only enforces `>= remainder`, so a caller who prefers over-paying
+ * min-ADA out of their own pocket can build such a tx manually; realistic
+ * CD sizes keep the remainder well above min-ADA, so this only affects
+ * dust-sized CDs withdrawn very close to maturity. (The owner payout has no
+ * such guard: a below-min-ADA owner output would be topped up from the
+ * owner's own wallet — a harmless self-payment.)
  */
 export async function buildEarlyWithdrawTx(
   lucid: LucidEvolution,
   params: EarlyWithdrawTxParams,
 ): Promise<EarlyWithdrawTxResult> {
   const scripts = resolveScripts(lucid, params);
-  const datum = readVaultDatum(params.vaultUtxo, scripts);
-  assertOwnerAddress(params.ownerAddress, datum);
+  const { datum, unit } = prepareVaultSpend(
+    scripts,
+    params.vaultUtxo,
+    params.ownerAddress,
+  );
+  assertIssuerAddress(params.issuerAddress, datum);
 
   if (params.withdrawAt < datum.start || params.withdrawAt >= datum.maturity) {
     throw new Error(
@@ -445,7 +509,6 @@ export async function buildEarlyWithdrawTx(
     );
   }
 
-  const unit = toUnit(datum.cdt_policy, datum.deposit_id);
   const accruedInterest = accrued(
     datum.principal,
     datum.rate_bps,
@@ -462,6 +525,10 @@ export async function buildEarlyWithdrawTx(
     t,
   );
   const payout = datum.principal + accruedInterest - penalty;
+  // Derived from the vault's ACTUAL lovelace, not the datum: for a genuine
+  // vault the two coincide (the mint enforces >= principal + full interest,
+  // and buildMintTx funds exactly that), and if a vault was ever over-funded
+  // the surplus flows to the issuer rather than being silently kept.
   const vaultLovelace = params.vaultUtxo.assets["lovelace"] ?? 0n;
   const remainder = vaultLovelace - payout;
   if (remainder < 0n) {
@@ -492,7 +559,7 @@ export async function buildEarlyWithdrawTx(
     );
     if (remainder < minIssuerLovelace) {
       throw new Error(
-        `Issuer remainder (${remainder} lovelace) is below the output's min-ADA (${minIssuerLovelace} lovelace); the transaction cannot pay it out exactly`,
+        `Issuer remainder (${remainder} lovelace) is below the issuer output's min-ADA (${minIssuerLovelace} lovelace), so it cannot be paid out exactly: Lucid would silently top the output up from the wallet, paying the issuer more than the vault owes. Refusing to build; withdraw at a slightly earlier time (larger remainder) or build the top-up transaction manually.`,
       );
     }
     txb = txb.pay.ToAddress(params.issuerAddress, { lovelace: remainder });
