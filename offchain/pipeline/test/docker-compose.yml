@@ -1,0 +1,22 @@
+name: cdt-pipeline-test
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: cdt-pipeline-test-db
+    environment:
+      POSTGRES_USER: bank
+      POSTGRES_PASSWORD: bank
+      POSTGRES_DB: bank_sim
+    ports:
+      - "55434:5432"
+    volumes:
+      # Vendored copy of bank-sim's schema.sql (see test/fixtures/).
+      - ./fixtures/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    healthcheck:
+      # -h 127.0.0.1 forces TCP so the check cannot pass before the initdb
+      # phase (which only listens on the unix socket) has applied the schema.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U bank -d bank_sim"]
+      interval: 1s
+      timeout: 5s
+      retries: 60
