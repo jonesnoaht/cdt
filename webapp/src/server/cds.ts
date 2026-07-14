@@ -19,7 +19,6 @@ import {
   earlyPayout,
   lovelaceToCents,
   maturePayout,
-  penaltyFee,
 } from "./math.js";
 
 /** Shape of the oracle watcher's signed attestation payload (jsonb column). */
@@ -63,6 +62,7 @@ export const CDS_SQL = `
     JOIN cd_products p ON p.id = t.product_id
     LEFT JOIN attestations att ON att.transaction_id = t.id
    WHERE a.wallet_address = $1 AND a.did = $2
+     AND a.kind = 'cd_funding'
      AND t.kind = 'deposit' AND t.product_id IS NOT NULL
    ORDER BY t.created_at DESC, t.id DESC
 `;
@@ -86,8 +86,15 @@ export function productDtoFromRow(row: {
   };
 }
 
-function asFiniteNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+/**
+ * Parse a payload field as a non-negative integer (truncating any fractional
+ * part), so a malformed attestation can never make a later BigInt()
+ * conversion or txlib's non-negativity assertions throw.
+ */
+function asFiniteInteger(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const truncated = Math.trunc(value);
+  return truncated >= 0 ? truncated : null;
 }
 
 function asString(value: unknown): string | null {
@@ -110,39 +117,57 @@ function buildCurve(
 ): CurvePoint[] {
   const points: CurvePoint[] = [];
   const span = maturity - start;
+  const principalCents = lovelaceToCents(principal);
   for (let i = 0; i < CURVE_SAMPLES; i++) {
     const t = start + (span * BigInt(i)) / BigInt(CURVE_SAMPLES - 1);
+    const accruedCents = lovelaceToCents(accrued(principal, rateBps, start, maturity, t));
+    const earlyPayoutCents = lovelaceToCents(
+      earlyPayout(principal, rateBps, start, maturity, penaltyBps, t),
+    );
     points.push({
       tMs: Number(t),
-      accruedCents: lovelaceToCents(accrued(principal, rateBps, start, maturity, t)),
-      penaltyCents: lovelaceToCents(penaltyFee(principal, rateBps, start, maturity, penaltyBps, t)),
-      earlyPayoutCents: lovelaceToCents(earlyPayout(principal, rateBps, start, maturity, penaltyBps, t)),
+      accruedCents,
+      // Derived (rather than independently floored via penaltyFee) so the
+      // displayed itemization always satisfies
+      //   principal + accrued − penalty === earlyPayout
+      // to the cent.
+      penaltyCents: principalCents + accruedCents - earlyPayoutCents,
+      earlyPayoutCents,
     });
   }
   return points;
 }
 
-/** Derive the member-facing CD DTO from a joined transaction row. */
-export function toCdDto(row: CdRow, nowMs: number): CdDto {
+/**
+ * Derive the member-facing CD DTO from a joined transaction row.
+ *
+ * The payout curve is relatively large (121 samples) and only the detail
+ * view needs it, so it is computed only when `includeCurve` is set.
+ */
+export function toCdDto(row: CdRow, nowMs: number, includeCurve = false): CdDto {
   const product = productDtoFromRow(row);
   const principalCents = Number(row.amount_cents);
   const createdAtMs = row.created_at.getTime();
 
   const signed = (row.payload ?? null) as SignedAttestationLike | null;
   const payload = signed?.payload;
-  const attStart = asFiniteNumber(payload?.start);
-  const attMaturity = asFiniteNumber(payload?.maturity);
-  const attPrincipal = asFiniteNumber(payload?.principal);
-  const attested = row.deposit_id !== null && attStart !== null && attMaturity !== null;
+  const attStart = asFiniteInteger(payload?.start);
+  const attMaturity = asFiniteInteger(payload?.maturity);
+  const attPrincipal = asFiniteInteger(payload?.principal);
+  const attested =
+    row.deposit_id !== null && attStart !== null && attMaturity !== null && attMaturity >= attStart;
 
   // Effective terms: the signed attestation payload when attested, else the
-  // product terms with the deposit time as a provisional start.
-  const rateBps = (attested ? asFiniteNumber(payload?.rate_bps) : null) ?? row.rate_bps;
-  const penaltyBps = (attested ? asFiniteNumber(payload?.penalty_bps) : null) ?? row.penalty_bps;
+  // product terms with the deposit time as a provisional start. Clamps keep
+  // txlib's non-negativity / maturity >= start assertions unreachable even
+  // for misconfigured product rows.
+  const rateBps = (attested ? asFiniteInteger(payload?.rate_bps) : null) ?? Math.max(0, row.rate_bps);
+  const penaltyBps =
+    (attested ? asFiniteInteger(payload?.penalty_bps) : null) ?? Math.max(0, row.penalty_bps);
   const startMs = attested ? attStart! : createdAtMs;
   const maturityMs = attested
     ? attMaturity!
-    : createdAtMs + row.term_months * ESTIMATED_MS_PER_MONTH;
+    : createdAtMs + Math.max(0, row.term_months) * ESTIMATED_MS_PER_MONTH;
 
   const status: CdStatus = !attested ? "pending" : nowMs < maturityMs ? "active" : "matured";
 
@@ -181,6 +206,6 @@ export function toCdDto(row: CdRow, nowMs: number): CdDto {
       earlyPayout(principal, rate, start, maturity, penalty, now),
     ),
     maturityValueCents: lovelaceToCents(maturePayout(principal, rate, start, maturity)),
-    curve: attested ? buildCurve(principal, rate, start, maturity, penalty) : null,
+    curve: attested && includeCurve ? buildCurve(principal, rate, start, maturity, penalty) : null,
   };
 }

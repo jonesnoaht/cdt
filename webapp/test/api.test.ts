@@ -169,8 +169,8 @@ describe("GET /api/members/:id/cds", () => {
     expect(matured.valueTodayCents).toBe(matured.maturityValueCents);
   });
 
-  it("returns an ascending payout curve for attested CDs only", async () => {
-    const { body } = await getJson<CdDto[]>(`/api/members/${fx.ada.memberId}/cds`);
+  it("returns an ascending payout curve for attested CDs when ?curve=1", async () => {
+    const { body } = await getJson<CdDto[]>(`/api/members/${fx.ada.memberId}/cds?curve=1`);
     const active = body.find((cd) => cd.transactionId === fx.cds.activeTxId)!;
     expect(active.curve).not.toBeNull();
     const curve = active.curve!;
@@ -181,6 +181,14 @@ describe("GET /api/members/:id/cds", () => {
       expect(curve[i]!.tMs).toBeGreaterThan(curve[i - 1]!.tMs);
       expect(curve[i]!.earlyPayoutCents).toBeGreaterThanOrEqual(curve[i - 1]!.earlyPayoutCents);
     }
+    // Itemization is penny-consistent: principal + accrued − penalty == payout.
+    for (const p of curve) {
+      expect(active.principalCents + p.accruedCents - p.penaltyCents).toBe(p.earlyPayoutCents);
+    }
+
+    // Without ?curve=1 (the dashboard list) the curve is omitted.
+    const { body: listBody } = await getJson<CdDto[]>(`/api/members/${fx.ada.memberId}/cds`);
+    expect(listBody.every((cd) => cd.curve === null)).toBe(true);
 
     const pending = body.find((cd) => cd.transactionId === fx.cds.pendingTxId)!;
     expect(pending.curve).toBeNull();
@@ -190,6 +198,20 @@ describe("GET /api/members/:id/cds", () => {
     expect(pending.projectionEstimated).toBe(true);
     // Pending projections estimate with product terms: value grows by term end.
     expect(pending.maturityValueCents).toBeGreaterThan(pending.principalCents);
+  });
+
+  it("tolerates malformed attestation payloads without failing the list", async () => {
+    // A fractional rate_bps must not make BigInt conversion throw (500).
+    await pool.query(
+      `UPDATE attestations SET payload = jsonb_set(payload, '{payload,rate_bps}', '450.7')
+        WHERE transaction_id = $1`,
+      [fx.cds.activeTxId],
+    );
+    const { status, body } = await getJson<CdDto[]>(`/api/members/${fx.ada.memberId}/cds`);
+    expect(status).toBe(200);
+    const active = body.find((cd) => cd.transactionId === fx.cds.activeTxId)!;
+    expect(active.rateBps).toBe(450); // truncated, not thrown
+    expect(active.status).toBe("active");
   });
 
   it("returns an empty list for a member without CDs", async () => {
@@ -252,6 +274,16 @@ describe("POST /api/members/:id/deposits", () => {
       });
       expect(status).toBe(400);
     }
+  });
+
+  it("rejects amounts too large for the oracle to tokenize", async () => {
+    // Above MAX_SAFE_INTEGER lovelace at the 1 cent = 10,000 lovelace peg.
+    const { status, body } = await postJson<{ error: string }>(
+      `/api/members/${fx.ada.memberId}/deposits`,
+      { productId: fx.products.sixMonth, amountCents: 1_000_000_000_000_00 },
+    );
+    expect(status).toBe(422);
+    expect(body.error).toContain("too large");
   });
 
   it("404s for an unknown member", async () => {

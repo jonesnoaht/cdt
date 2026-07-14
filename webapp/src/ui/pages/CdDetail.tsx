@@ -15,7 +15,10 @@ function AccrualChart({ cd }: { cd: CdDto }) {
   const t1 = curve[curve.length - 1]!.tMs;
   const v0 = cd.principalCents;
   const v1 = cd.maturityValueCents;
-  const x = (t: number) => pad.left + ((t - t0) / (t1 - t0)) * (width - pad.left - pad.right);
+  const x = (t: number) =>
+    t1 === t0
+      ? pad.left
+      : pad.left + ((t - t0) / (t1 - t0)) * (width - pad.left - pad.right);
   const y = (v: number) =>
     v1 === v0
       ? height - pad.bottom
@@ -30,8 +33,8 @@ function AccrualChart({ cd }: { cd: CdDto }) {
   return (
     <figure className="chart">
       <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Certificate value over the term">
-        {[v0, (v0 + v1) / 2, v1].map((v) => (
-          <g key={v}>
+        {[v0, (v0 + v1) / 2, v1].map((v, i) => (
+          <g key={i}>
             <line className="chart__grid" x1={pad.left} x2={width - pad.right} y1={y(v)} y2={y(v)} />
             <text className="chart__tick" x={pad.left - 8} y={y(v) + 4} textAnchor="end">
               {money(Math.round(v))}
@@ -180,7 +183,7 @@ export function CdDetail({ member, txId }: { member: MemberDto; txId: number }) 
 
   useEffect(() => {
     api
-      .cds(member.id)
+      .cds(member.id, { curve: true })
       .then(setCds)
       .catch((err) => setError(String(err)));
   }, [member.id]);

@@ -36,7 +36,8 @@ export const api = {
   members: () => request<MemberDto[]>("/api/members"),
   products: () => request<ProductDto[]>("/api/products"),
   accounts: (memberId: number) => request<AccountDto[]>(`/api/members/${memberId}/accounts`),
-  cds: (memberId: number) => request<CdDto[]>(`/api/members/${memberId}/cds`),
+  cds: (memberId: number, opts?: { curve?: boolean }) =>
+    request<CdDto[]>(`/api/members/${memberId}/cds${opts?.curve ? "?curve=1" : ""}`),
   openCd: (memberId: number, body: DepositRequest) =>
     request<DepositResponse>(`/api/members/${memberId}/deposits`, {
       method: "POST",

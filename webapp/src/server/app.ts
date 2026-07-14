@@ -13,7 +13,14 @@ import type {
   ProductDto,
 } from "../shared/types.js";
 import { chainLookup } from "./chain.js";
-import { CDS_SQL, toCdDto, type CdRow } from "./cds.js";
+import { CDS_SQL, productDtoFromRow, toCdDto, type CdRow } from "./cds.js";
+
+/**
+ * Largest deposit (in cents) whose lovelace representation still fits in a
+ * safe integer — the oracle watcher rejects anything larger when building
+ * the attestation payload, which would leave the deposit pending forever.
+ */
+const MAX_DEPOSIT_CENTS = Math.floor(Number.MAX_SAFE_INTEGER / 10_000);
 
 export interface AppOptions {
   pool: pg.Pool;
@@ -62,18 +69,10 @@ export function createApp(options: AppOptions): Hono {
   // --- CD product catalog ---------------------------------------------------
   app.get("/api/products", async (c) => {
     const { rows } = await pool.query(
-      `SELECT id, name, term_months, rate_bps, penalty_bps, min_deposit_cents
+      `SELECT id AS product_id, name, term_months, rate_bps, penalty_bps, min_deposit_cents
          FROM cd_products ORDER BY term_months, id`,
     );
-    const products: ProductDto[] = rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      termMonths: r.term_months,
-      rateBps: r.rate_bps,
-      apyPercent: r.rate_bps / 100,
-      penaltyBps: r.penalty_bps,
-      minDepositCents: Number(r.min_deposit_cents),
-    }));
+    const products: ProductDto[] = rows.map(productDtoFromRow);
     return c.json(products);
   });
 
@@ -132,8 +131,10 @@ export function createApp(options: AppOptions): Hono {
     const member = await resolveMember(pool, id);
     if (!member) return c.json({ error: "Member not found." }, 404);
 
+    // The payout curve is only needed by the certificate detail view.
+    const includeCurve = c.req.query("curve") === "1";
     const { rows } = await pool.query(CDS_SQL, [member.walletAddress, member.did]);
-    return c.json(rows.map((row) => toCdDto(row as CdRow, now())));
+    return c.json(rows.map((row) => toCdDto(row as CdRow, now(), includeCurve)));
   });
 
   // --- Open a CD --------------------------------------------------------------
@@ -156,6 +157,9 @@ export function createApp(options: AppOptions): Hono {
     }
     if (typeof amountCents !== "number" || !Number.isSafeInteger(amountCents) || amountCents <= 0) {
       return c.json({ error: "amountCents must be a positive integer number of cents." }, 400);
+    }
+    if (amountCents > MAX_DEPOSIT_CENTS) {
+      return c.json({ error: "Deposit amount is too large to tokenize." }, 422);
     }
 
     const member = await resolveMember(pool, id);

@@ -63,7 +63,7 @@ endpoint returns `{ "available": false }` gracefully.
 | `GET /api/products`              | CD catalog with APY computed from `rate_bps`                                                                                              |
 | `GET /api/members`               | Members for the demo login picker                                                                                                         |
 | `GET /api/members/:id/accounts`  | The member's accounts with balances                                                                                                       |
-| `GET /api/members/:id/cds`       | The member's CDs joined with attestations: derived status (pending / active / matured), terms, tx hash, and txlib-computed projections + payout curve |
+| `GET /api/members/:id/cds`       | The member's CDs joined with attestations: derived status (pending / active / matured), terms, tx hash, and txlib-computed projections (`?curve=1` adds the payout curve) |
 | `POST /api/members/:id/deposits` | Open a CD: `{ productId, amountCents }`, validated against the product minimum                                                            |
 | `GET /api/cds/:depositId/chain`  | Optional on-chain lookup (Koios preview); `{ available: false }` when offline                                                             |
 

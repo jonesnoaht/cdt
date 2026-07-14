@@ -84,7 +84,8 @@ export interface CdDto {
   maturityValueCents: number;
   /**
    * Early-withdrawal payout sampled across the term (ascending tMs), for the
-   * accrual chart and the withdrawal calculator. Null while pending.
+   * accrual chart and the withdrawal calculator. Null while pending, and
+   * only populated when requested with `?curve=1` (the detail view).
    */
   curve: CurvePoint[] | null;
 }
