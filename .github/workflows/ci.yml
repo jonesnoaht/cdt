@@ -83,8 +83,11 @@ jobs:
           - offchain/cdt-txlib
           - offchain/oracle-watcher
           - offchain/demo
+          - offchain/pipeline
+          - offchain/testnet
           - bank-sim
           - credentials
+          - webapp
     steps:
       - uses: actions/checkout@v4
 
@@ -148,10 +151,33 @@ jobs:
         working-directory: offchain/oracle-watcher
         run: docker compose -f test/docker-compose.yml up -d --wait
 
+      - name: Start Postgres (pipeline)
+        if: steps.check.outputs.exists == 'true' && matrix.package == 'offchain/pipeline'
+        working-directory: offchain/pipeline
+        run: docker compose -f test/docker-compose.yml up -d --wait
+
+      - name: Start Postgres (webapp)
+        if: steps.check.outputs.exists == 'true' && matrix.package == 'webapp'
+        working-directory: webapp
+        run: docker compose -f test/docker-compose.yml up -d --wait
+
+      # offchain/testnet has no vitest suite: its "test" is a live lifecycle
+      # run against the preview testnet (faucet + real txs), which does not
+      # belong in CI. Typecheck is its CI contract.
       - name: npm test
-        if: steps.check.outputs.exists == 'true'
+        if: steps.check.outputs.exists == 'true' && matrix.package != 'offchain/testnet'
         working-directory: ${{ matrix.package }}
         run: npm test
+
+      - name: npm run typecheck (offchain/testnet)
+        if: steps.check.outputs.exists == 'true' && matrix.package == 'offchain/testnet'
+        working-directory: offchain/testnet
+        run: npm run typecheck
+
+      - name: npm run build (webapp)
+        if: steps.check.outputs.exists == 'true' && matrix.package == 'webapp'
+        working-directory: webapp
+        run: npm run build
 
       - name: npm run demo
         if: steps.check.outputs.exists == 'true' && matrix.package == 'offchain/demo'
@@ -166,6 +192,16 @@ jobs:
       - name: Tear down Postgres (oracle-watcher)
         if: always() && steps.check.outputs.exists == 'true' && matrix.package == 'offchain/oracle-watcher'
         working-directory: offchain/oracle-watcher
+        run: docker compose -f test/docker-compose.yml down -v
+
+      - name: Tear down Postgres (pipeline)
+        if: always() && steps.check.outputs.exists == 'true' && matrix.package == 'offchain/pipeline'
+        working-directory: offchain/pipeline
+        run: docker compose -f test/docker-compose.yml down -v
+
+      - name: Tear down Postgres (webapp)
+        if: always() && steps.check.outputs.exists == 'true' && matrix.package == 'webapp'
+        working-directory: webapp
         run: docker compose -f test/docker-compose.yml down -v
 
   docs:
