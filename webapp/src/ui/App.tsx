@@ -1,0 +1,130 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { MemberDto } from "../shared/types.js";
+import { api } from "./api.js";
+import { ErrorNote, Spinner } from "./components.js";
+import { About } from "./pages/About.js";
+import { CdDetail } from "./pages/CdDetail.js";
+import { Dashboard } from "./pages/Dashboard.js";
+import { MemberPicker } from "./pages/MemberPicker.js";
+import { OpenCd } from "./pages/OpenCd.js";
+
+export const BRAND_NAME = import.meta.env.VITE_BRAND_NAME || "CampusUSA Credit Union";
+
+const MEMBER_KEY = "cdt.memberId";
+
+type Route =
+  | { page: "dashboard" }
+  | { page: "cd"; txId: number }
+  | { page: "open" }
+  | { page: "about" };
+
+function parseRoute(hash: string): Route {
+  const path = hash.replace(/^#/, "");
+  const cd = path.match(/^\/cd\/(\d+)$/);
+  if (cd) return { page: "cd", txId: Number(cd[1]) };
+  if (path === "/open") return { page: "open" };
+  if (path === "/about") return { page: "about" };
+  return { page: "dashboard" };
+}
+
+function useHashRoute(): Route {
+  const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash));
+  useEffect(() => {
+    const onChange = () => setRoute(parseRoute(window.location.hash));
+    window.addEventListener("hashchange", onChange);
+    return () => window.removeEventListener("hashchange", onChange);
+  }, []);
+  return route;
+}
+
+export function App() {
+  const route = useHashRoute();
+  const [members, setMembers] = useState<MemberDto[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [memberId, setMemberId] = useState<number | null>(() => {
+    const raw = window.localStorage.getItem(MEMBER_KEY);
+    return raw ? Number(raw) : null;
+  });
+
+  useEffect(() => {
+    api
+      .members()
+      .then(setMembers)
+      .catch((err) => setError(`Could not reach the portal API: ${String(err)}`));
+  }, []);
+
+  const member = useMemo(
+    () => members?.find((m) => m.id === memberId) ?? null,
+    [members, memberId],
+  );
+
+  const selectMember = useCallback((m: MemberDto) => {
+    window.localStorage.setItem(MEMBER_KEY, String(m.id));
+    setMemberId(m.id);
+    window.location.hash = "#/";
+  }, []);
+
+  const signOut = useCallback(() => {
+    window.localStorage.removeItem(MEMBER_KEY);
+    setMemberId(null);
+  }, []);
+
+  return (
+    <div className="shell">
+      <header className="topbar">
+        <a className="wordmark" href="#/">
+          <span className="wordmark__seal" aria-hidden="true" />
+          <span>
+            <span className="wordmark__name">{BRAND_NAME}</span>
+            <span className="wordmark__sub">Member portal · Share certificates</span>
+          </span>
+        </a>
+        <nav className="topnav" aria-label="Primary">
+          <a href="#/" className={route.page === "dashboard" || route.page === "cd" ? "is-active" : ""}>
+            Certificates
+          </a>
+          <a href="#/open" className={route.page === "open" ? "is-active" : ""}>
+            Open a certificate
+          </a>
+          <a href="#/about" className={route.page === "about" ? "is-active" : ""}>
+            How it works
+          </a>
+        </nav>
+        {member && (
+          <div className="whoami">
+            <span className="whoami__name">{member.memberName}</span>
+            <button className="linklike" onClick={signOut} type="button">
+              Switch member
+            </button>
+          </div>
+        )}
+      </header>
+
+      <main className="content">
+        {error ? (
+          <ErrorNote message={error} />
+        ) : members === null ? (
+          <Spinner />
+        ) : route.page === "about" ? (
+          <About />
+        ) : member === null ? (
+          <MemberPicker members={members} onSelect={selectMember} />
+        ) : route.page === "cd" ? (
+          <CdDetail member={member} txId={route.txId} />
+        ) : route.page === "open" ? (
+          <OpenCd member={member} />
+        ) : (
+          <Dashboard member={member} />
+        )}
+      </main>
+
+      <footer className="footer">
+        <p>
+          Deposits are held at the credit union and federally insured by the NCUA up to
+          applicable limits. Certificate tokens are a record of ownership — your money never
+          leaves the credit union. Demonstration environment; not real accounts.
+        </p>
+      </footer>
+    </div>
+  );
+}
