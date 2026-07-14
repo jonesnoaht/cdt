@@ -1,19 +1,22 @@
 /**
- * Fast unit tests for the vendored mocks: interest math (mirrors the Aiken
- * lib), the W3C VC mock, and the in-memory bank ledger.
+ * Fast unit tests for the demo's building blocks: @cdt/txlib's interest math
+ * (the off-chain mirror of onchain/lib/cdt/interest.ak), the @cdt/credentials
+ * verifiable-credential ceremony, and the demo's in-memory bank ledger.
  */
 
 import { describe, expect, it } from "vitest";
 
-import { BankLedger } from "../src/bank.js";
 import {
+  ACCOUNT_HOLDER_CREDENTIAL,
+  createHolder,
+  createIssuer,
   createPresentation,
-  generateDidActor,
+  didFromPublicKey,
+  INSURED_INSTITUTION_CREDENTIAL,
   issueCredential,
   publicKeyFromDid,
-  verifyCredential,
   verifyPresentation,
-} from "../src/credentials.js";
+} from "@cdt/credentials";
 import {
   accrued,
   earlyPayout,
@@ -21,116 +24,156 @@ import {
   maturePayout,
   penaltyFee,
   YEAR_MS,
-  type CdTerms,
-} from "../src/interest.js";
+} from "@cdt/txlib";
 
-describe("interest math (mirrors lib/cdt/interest.ak)", () => {
-  const terms: CdTerms = {
-    principal: 10_000_000_000n,
-    rateBps: 450n,
-    start: 0n,
-    maturity: YEAR_MS,
-    penaltyBps: 1_000n,
-  };
+import { BankLedger } from "../src/bank.js";
+
+describe("interest math (@cdt/txlib mirror of lib/cdt/interest.ak)", () => {
+  const principal = 10_000_000_000n;
+  const rateBps = 450n;
+  const start = 0n;
+  const maturity = YEAR_MS;
+  const penaltyBps = 1_000n;
 
   it("computes one year of full interest", () => {
-    expect(fullInterest(terms)).toBe(450_000_000n);
-    expect(maturePayout(terms)).toBe(10_450_000_000n);
+    expect(fullInterest(principal, rateBps, start, maturity)).toBe(450_000_000n);
+    expect(maturePayout(principal, rateBps, start, maturity)).toBe(10_450_000_000n);
   });
 
   it("clamps accrual to the term", () => {
-    expect(accrued(terms, -5n)).toBe(0n);
-    expect(accrued(terms, YEAR_MS * 2n)).toBe(fullInterest(terms));
+    expect(accrued(principal, rateBps, start, maturity, -5n)).toBe(0n);
+    expect(accrued(principal, rateBps, start, maturity, YEAR_MS * 2n)).toBe(
+      fullInterest(principal, rateBps, start, maturity),
+    );
   });
 
   it("floors the 120-second demo term the same way the validator does", () => {
-    const short: CdTerms = { ...terms, maturity: 120_000n };
     // 10^10 * 450 * 120_000 / (10^4 * 31_557_600_000) = 1711.15… -> 1711
-    expect(fullInterest(short)).toBe(1_711n);
+    expect(fullInterest(principal, rateBps, 0n, 120_000n)).toBe(1_711n);
   });
 
   it("applies the early-withdrawal penalty to accrued interest only", () => {
     const t = YEAR_MS / 2n;
-    expect(accrued(terms, t)).toBe(225_000_000n);
-    expect(penaltyFee(accrued(terms, t), terms.penaltyBps)).toBe(22_500_000n);
-    expect(earlyPayout(terms, t)).toBe(10_000_000_000n + 202_500_000n);
+    expect(accrued(principal, rateBps, start, maturity, t)).toBe(225_000_000n);
+    expect(penaltyFee(principal, rateBps, start, maturity, penaltyBps, t)).toBe(
+      22_500_000n,
+    );
+    expect(earlyPayout(principal, rateBps, start, maturity, penaltyBps, t)).toBe(
+      10_000_000_000n + 202_500_000n,
+    );
   });
 });
 
-describe("verifiable credentials mock", () => {
+describe("verifiable credentials (@cdt/credentials)", () => {
+  const CHALLENGE = "nonce-units-test";
+
   it("issues, presents, and verifies the NCUA → CU → member chain", () => {
-    const ncua = generateDidActor();
-    const cu = generateDidActor();
-    const member = generateDidActor();
+    const ncua = createIssuer("NCUA");
+    const cu = createIssuer("CampusUSA Credit Union");
+    const member = createHolder();
 
-    const institutionVc = issueCredential(ncua, "InsuredInstitutionCredential", {
-      id: cu.did,
+    const institutionVc = issueCredential(
+      ncua,
+      cu.did,
+      INSURED_INSTITUTION_CREDENTIAL,
+      { charterNumber: "68589" },
+    );
+    const holderVc = issueCredential(cu, member.did, ACCOUNT_HOLDER_CREDENTIAL, {
+      kycLevel: "full",
     });
-    const holderVc = issueCredential(cu, "AccountHolderCredential", {
-      id: member.did,
-    });
-    expect(verifyCredential(institutionVc).ok).toBe(true);
-    expect(verifyCredential(holderVc).ok).toBe(true);
 
-    const presentation = createPresentation(member, [institutionVc, holderVc]);
+    const presentation = createPresentation(member, [institutionVc, holderVc], {
+      challenge: CHALLENGE,
+    });
     const result = verifyPresentation(presentation, {
-      trustedRoot: ncua.did,
-      institutionCredentialType: "InsuredInstitutionCredential",
-      holderCredentialType: "AccountHolderCredential",
+      trustedRoots: [ncua.did],
+      challenge: CHALLENGE,
     });
     expect(result).toEqual({ ok: true });
   });
 
   it("round-trips public keys through did:key", () => {
-    const actor = generateDidActor();
-    const resolved = publicKeyFromDid(actor.did);
-    expect(resolved.equals(actor.publicKey)).toBe(true);
+    const holder = createHolder();
+    const resolved = publicKeyFromDid(holder.did);
+    expect(resolved.equals(holder.keys.publicKey)).toBe(true);
+    expect(didFromPublicKey(resolved)).toBe(holder.did);
   });
 
   it("rejects tampered credentials and untrusted roots", () => {
-    const ncua = generateDidActor();
-    const rogue = generateDidActor();
-    const cu = generateDidActor();
-    const member = generateDidActor();
+    const ncua = createIssuer("NCUA");
+    const rogue = createIssuer("Rogue Root");
+    const cu = createIssuer("CampusUSA Credit Union");
+    const member = createHolder();
 
-    const institutionVc = issueCredential(ncua, "InsuredInstitutionCredential", {
-      id: cu.did,
-    });
-    const holderVc = issueCredential(cu, "AccountHolderCredential", {
-      id: member.did,
+    const institutionVc = issueCredential(
+      ncua,
+      cu.did,
+      INSURED_INSTITUTION_CREDENTIAL,
+      {},
+    );
+    const holderVc = issueCredential(cu, member.did, ACCOUNT_HOLDER_CREDENTIAL, {
+      kycLevel: "full",
     });
 
-    // Tampering breaks the signature.
+    // Tampering breaks the credential signature.
     const tampered = {
       ...holderVc,
-      credentialSubject: { id: member.did, kycLevel: "forged" },
+      credentialSubject: { ...holderVc.credentialSubject, kycLevel: "forged" },
     };
-    expect(verifyCredential(tampered).ok).toBe(false);
+    const tamperedResult = verifyPresentation(
+      createPresentation(member, [institutionVc, tampered], {
+        challenge: CHALLENGE,
+      }),
+      { trustedRoots: [ncua.did], challenge: CHALLENGE },
+    );
+    expect(tamperedResult.ok).toBe(false);
+    expect(tamperedResult.ok ? "" : tamperedResult.reason).toMatch(/tampered/);
 
     // A chain rooted somewhere else is refused.
-    const rogueInstitutionVc = issueCredential(rogue, "InsuredInstitutionCredential", {
-      id: cu.did,
-    });
-    const presentation = createPresentation(member, [rogueInstitutionVc, holderVc]);
-    const result = verifyPresentation(presentation, {
-      trustedRoot: ncua.did,
-      institutionCredentialType: "InsuredInstitutionCredential",
-      holderCredentialType: "AccountHolderCredential",
-    });
-    expect(result.ok).toBe(false);
-    expect(result.reason).toMatch(/trusted root/);
+    const rogueInstitutionVc = issueCredential(
+      rogue,
+      cu.did,
+      INSURED_INSTITUTION_CREDENTIAL,
+      {},
+    );
+    const rogueResult = verifyPresentation(
+      createPresentation(member, [rogueInstitutionVc, holderVc], {
+        challenge: CHALLENGE,
+      }),
+      { trustedRoots: [ncua.did], challenge: CHALLENGE },
+    );
+    expect(rogueResult.ok).toBe(false);
+    expect(rogueResult.ok ? "" : rogueResult.reason).toMatch(/trusted root/);
   });
 
   it("rejects expired credentials", () => {
-    const ncua = generateDidActor();
-    const cu = generateDidActor();
-    const vc = issueCredential(
+    const ncua = createIssuer("NCUA");
+    const cu = createIssuer("CampusUSA Credit Union");
+    const member = createHolder();
+
+    const institutionVc = issueCredential(
       ncua,
-      "InsuredInstitutionCredential",
-      { id: cu.did },
-      { validForMs: 1000 },
+      cu.did,
+      INSURED_INSTITUTION_CREDENTIAL,
+      {},
     );
-    expect(verifyCredential(vc, new Date(Date.now() + 5000)).ok).toBe(false);
+    const holderVc = issueCredential(
+      cu,
+      member.did,
+      ACCOUNT_HOLDER_CREDENTIAL,
+      { kycLevel: "full" },
+      { expiresInMs: 1000 },
+    );
+    const presentation = createPresentation(member, [institutionVc, holderVc], {
+      challenge: CHALLENGE,
+    });
+    const result = verifyPresentation(presentation, {
+      trustedRoots: [ncua.did],
+      challenge: CHALLENGE,
+      now: new Date(Date.now() + 5000),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.ok ? "" : result.reason).toMatch(/expired/);
   });
 });
 
