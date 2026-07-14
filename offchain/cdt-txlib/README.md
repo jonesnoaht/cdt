@@ -85,9 +85,14 @@ early-withdrawal amounts were computed at. The aligned bound is returned as
 ### `buildMintTx(lucid, { blueprint, oracleVkh, ownerAddress, terms })`
 
 - mints exactly 1 CDT with asset name `terms.depositId` (redeemer
-  `MintCD { datum }`) and pays it to the owner;
-- locks `principal + full_interest` lovelace at the vault with the inline
-  `CDDatum`;
+  `MintCD { datum }`);
+- locks the minted CDT **inside the vault output**, together with
+  `principal + full_interest` lovelace and the inline `CDDatum`
+  (`cdt_policy` pinned to the applied policy id) — the on-chain `cdt_mint`
+  policy requires exactly this shape; a mint paying the CDT anywhere else
+  (e.g. to the owner) fails phase-2 validation. Ownership is tracked by
+  `CDDatum.owner` (= `ownerAddress`'s payment key hash), not by token
+  custody;
 - requires the oracle as extra signatory — the oracle watcher attests the
   bank deposit by co-signing.
 
@@ -104,27 +109,38 @@ await signed.submit();
 ### `buildRedeemTx(lucid, { blueprint, oracleVkh, vaultUtxo, ownerAddress, validFrom? })`
 
 - decodes and validates the vault's inline `CDDatum` (policy id match +
-  term ranges — inline datums at a public address are untrusted input);
+  term ranges — inline datums at a public address are untrusted input), and
+  checks the vault UTxO holds exactly 1 CDT (the mint locks it there);
 - requires `ownerAddress`'s payment credential to be the datum's `owner`;
 - spends the vault UTxO with `Redeem`;
 - sets the validity lower bound to `maturity` (or a later `validFrom`),
   aligned up to a slot boundary;
-- burns the CDT with `BurnCD` (the wallet must hold it);
+- burns the CDT with `BurnCD` (the token comes out of the vault UTxO);
 - pays the owner `principal + full_interest` and requires the owner's
   signature.
 
 ### `buildEarlyWithdrawTx(lucid, { blueprint, oracleVkh, vaultUtxo, ownerAddress, issuerAddress, withdrawAt })`
 
-- decodes/validates the datum and checks `ownerAddress` as above;
+- decodes/validates the datum and checks `ownerAddress` and the vault's CDT
+  as above; additionally requires `issuerAddress`'s payment credential to be
+  the datum's `issuer` (the on-chain vault credits the remainder only to the
+  issuer's key);
 - spends the vault UTxO with `EarlyWithdraw`;
 - aligns `withdrawAt` up to the next slot boundary `t'` (must stay in
   `[start, maturity)`), uses `t'` both as the validity lower bound and for
   the payout math so on-chain and off-chain amounts agree;
 - burns the CDT;
 - pays the owner `principal + accrued(t') - penalty_fee(t')` and returns the
-  remaining vault lovelace to the issuer (throws if a positive remainder
-  would be below the issuer output's min-ADA, rather than letting Lucid
-  silently round it up).
+  remaining vault lovelace to the issuer.
+
+**Sub-min-ADA issuer remainder:** if the remainder is positive but below the
+issuer output's min-ADA, the builder refuses to build (throws) instead of
+letting Lucid silently top the output up from the wallet, which would pay
+the issuer more than the vault owes. The on-chain vault only enforces
+`>= remainder`, so callers who prefer over-paying min-ADA out of pocket can
+build that transaction themselves; realistic CD sizes keep the remainder
+well above min-ADA, so this only affects dust-sized CDs withdrawn very close
+to maturity.
 
 All builders return the unsigned `TxSignBuilder` plus the derived values
 (datum, unit, payouts, resolved scripts).
@@ -145,4 +161,10 @@ All builders return the unsigned `TxSignBuilder` plus the derived values
   (`test/fixtures/alwaysTrue.ts`) so the tests do not depend on the on-chain
   unit. The always-succeeds scripts cannot enforce the on-chain rules, so
   validation-side behavior (signature requirements, validity bounds, exact
-  amounts) is asserted by inspecting the built transactions.
+  amounts) is asserted by inspecting the built transactions;
+- `test/builders.real-blueprint.emulator.test.ts` — regression tests against
+  the REAL blueprint (`../../onchain/plutus.json`, loaded by relative path in
+  the test only): the emulator phase-2-evaluates the actual `cdt_mint` /
+  `cd_vault` scripts through the full mint → redeem and mint → early-withdraw
+  chains, and proves the pre-fix mint shape (CDT paid to the owner instead of
+  locked in the vault) fails phase-2 validation.
