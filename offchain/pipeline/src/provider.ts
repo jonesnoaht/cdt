@@ -66,6 +66,13 @@ export interface ChainContext {
   selectWallet(key: string): void;
   /** Wait until `txHash` is confirmed (one emulator block / provider poll). */
   awaitTx(txHash: string): Promise<void>;
+  /**
+   * Wait until the chain clock has reached `timeMs` (POSIX ms): advances the
+   * emulator's slots, or sleeps until the wall clock catches up on a real
+   * network (needed when a validity lower bound was slot-aligned UP into the
+   * near future). No-op when the time has already passed.
+   */
+  waitUntil(timeMs: number): Promise<void>;
 }
 
 export interface ChainContextOptions {
@@ -158,6 +165,10 @@ export async function createChainContext(
       awaitTx: async (txHash) => {
         await lucid.awaitTx(txHash, 20);
       },
+      waitUntil: async (timeMs) => {
+        const delta = timeMs - emulator.now();
+        if (delta > 0) emulator.awaitSlot(Math.ceil(delta / 1000));
+      },
     };
   }
 
@@ -208,6 +219,10 @@ export async function createChainContext(
     selectWallet: (key) => lucid.selectWallet.fromPrivateKey(key),
     awaitTx: async (txHash) => {
       await lucid.awaitTx(txHash, 5000);
+    },
+    waitUntil: async (timeMs) => {
+      const delta = timeMs - Date.now();
+      if (delta > 0) await new Promise((r) => setTimeout(r, delta));
     },
   };
 }

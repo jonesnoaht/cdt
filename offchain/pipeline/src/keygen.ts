@@ -10,7 +10,6 @@
  * Prints each key's preview address so the wallets can be funded from the
  * testnet faucet.
  */
-import { generateKeyPairSync } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -19,6 +18,10 @@ import {
   credentialToAddress,
   generatePrivateKey,
 } from "./lucid.js";
+import {
+  generateEd25519KeyPair,
+  privateKeyToPem,
+} from "../../oracle-watcher/src/index.ts";
 
 function addressOf(bech32Sk: string): string {
   const vkh = CML.PrivateKey.from_bech32(bech32Sk)
@@ -43,13 +46,10 @@ function main(): void {
     console.log(`        preview address: ${addressOf(sk)}`);
   }
 
-  const { privateKey } = generateKeyPairSync("ed25519");
+  // Same helpers the watcher uses to load the key back (privateKeyFromPem).
+  const { privateKey } = generateEd25519KeyPair();
   const pemFile = join(outDir, "oracle-attestation.pem");
-  writeFileSync(
-    pemFile,
-    privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
-    { mode: 0o600 },
-  );
+  writeFileSync(pemFile, privateKeyToPem(privateKey), { mode: 0o600 });
   console.log(`oracle-attestation ${pemFile}`);
   console.log(
     "\nFund the issuer (and member) addresses from https://docs.cardano.org/cardano-testnets/tools/faucet",

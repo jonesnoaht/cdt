@@ -70,15 +70,19 @@ export class CredentialDirectory {
     this.members.set(bankDid, { holder, credential });
   }
 
-  /** Enroll every member currently present in the bank's accounts table. */
+  /**
+   * Enroll every member currently present in the bank's accounts table.
+   * Returns the number of newly enrolled member DIDs.
+   */
   async enrollFromAccounts(pool: pg.Pool): Promise<number> {
     const { rows } = await pool.query(
-      "SELECT DISTINCT did, member_name FROM accounts",
+      "SELECT DISTINCT did, member_name FROM accounts WHERE did IS NOT NULL AND did <> ''",
     );
+    const before = this.members.size;
     for (const row of rows) {
       this.enroll(String(row.did), String(row.member_name));
     }
-    return rows.length;
+    return this.members.size - before;
   }
 
   isEnrolled(bankDid: string): boolean {

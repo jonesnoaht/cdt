@@ -31,7 +31,7 @@ import {
   CDDatum,
   MintRedeemer,
   assertHexBytes,
-  fullInterest,
+  maturePayout,
   type CDTerms,
   type CdtScripts,
 } from "../../cdt-txlib/src/index.ts";
@@ -115,9 +115,14 @@ export async function buildVaultMintTx(
   };
   const datumCbor = Data.to(datum, CDDatum);
   const unit = toUnit(scripts.policyId, depositId);
-  const lockedLovelace =
-    terms.principal +
-    fullInterest(terms.principal, terms.rateBps, terms.start, terms.maturity);
+  // Exactly what the on-chain policy requires the vault to hold (and what
+  // service.ts reports on its idempotent paths).
+  const lockedLovelace = maturePayout(
+    terms.principal,
+    terms.rateBps,
+    terms.start,
+    terms.maturity,
+  );
 
   // Lucid silently raises a below-minimum output to min-ADA, which would
   // desync the vault value from the datum's terms. Refuse instead.

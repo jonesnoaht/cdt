@@ -132,8 +132,12 @@ Notes for preview mode:
   (a failed `onAttested` is re-queued and re-delivered every poll cycle).
   `mintAttested` therefore checks the recorded `tx_hash` in
   `attestations.payload` and the vault UTxO set before building a
-  transaction: a `deposit_id` can never be minted twice. A crash between
-  submit and DB write-back is reconciled from the chain on redelivery.
+  transaction, and records the tx hash immediately after submission
+  (before awaiting confirmation): a `deposit_id` can never be minted
+  twice. Chain operations are serialized behind an in-process lock so a
+  concurrent `/redeem` cannot race the watcher's wallet selection. In
+  preview mode, boot re-drives any attested-but-unminted deposits left
+  behind by a crash (the watcher's retry queue is in-memory only).
 - **CDT custody.** The on-chain `cdt_mint` policy requires the minted token
   to sit **in the vault output** together with `principal + full_interest`
   and the inline `CDDatum` — the member's claim is the datum's `owner` key

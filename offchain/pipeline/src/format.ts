@@ -3,9 +3,11 @@
 /** Render lovelace as an ADA amount, e.g. `1234.567890 ADA`. */
 export function ada(lovelace: bigint | string | number): string {
   const v = BigInt(lovelace);
-  const whole = v / 1_000_000n;
-  const frac = (v < 0n ? -v : v) % 1_000_000n;
-  return `${whole}.${frac.toString().padStart(6, "0")} ADA`;
+  const abs = v < 0n ? -v : v;
+  const sign = v < 0n ? "-" : "";
+  const whole = abs / 1_000_000n;
+  const frac = abs % 1_000_000n;
+  return `${sign}${whole}.${frac.toString().padStart(6, "0")} ADA`;
 }
 
 export function shortHash(hash: string | null, length = 12): string {

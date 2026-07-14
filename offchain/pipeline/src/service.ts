@@ -28,6 +28,7 @@
 import { createPublicKey } from "node:crypto";
 import type pg from "pg";
 import {
+  CML,
   credentialToAddress,
   fromText,
   toText,
@@ -45,6 +46,7 @@ import {
 import { buildVaultMintTx } from "./mint.js";
 import {
   OracleWatcher,
+  centsToLovelace,
   verifyAttestation,
   type SignedAttestation,
   type WatcherLogger,
@@ -125,6 +127,14 @@ export class IssuanceService {
   /** wallet vkh (hex) -> bech32 private key, for member wallets we control. */
   private readonly memberKeyByVkh = new Map<string, string>();
   private readonly mintAttempts = new Map<string, number>();
+  /**
+   * Serializes every wallet-mutating chain operation. The Lucid instance has
+   * ONE active wallet, and the watcher's mints (issuer wallet) run on the
+   * same event loop as control-server redeems (member wallet) — without
+   * this lock, an interleaved `selectWallet` would sign one party's tx with
+   * the other party's key.
+   */
+  private chainLock: Promise<void> = Promise.resolve();
 
   constructor(options: IssuanceServiceOptions) {
     this.pool = options.pool;
@@ -149,18 +159,55 @@ export class IssuanceService {
   }
 
   /**
-   * Boot ceremony: enroll members into the credential directory and, in
+   * Boot ceremony: enroll members into the credential directory; in
    * emulator mode, assign every member a pre-funded emulator wallet (the
-   * seeded wallet addresses are placeholders that cannot receive a CDT).
+   * seeded wallet addresses are placeholders that cannot receive a CDT);
+   * in preview mode, recover attested-but-unminted deposits left behind by
+   * a crash or a previous give-up (the watcher only re-delivers in-memory).
    */
   async boot(): Promise<void> {
     const enrolled = await this.directory.enrollFromAccounts(this.pool);
     this.log.info(
       `pipeline: credential ceremony complete — NCUA ${this.directory.ncua.did} -> ` +
-        `credit union ${this.directory.creditUnion.did} -> ${enrolled} enrolled account(s)`,
+        `credit union ${this.directory.creditUnion.did} -> ${enrolled} enrolled member(s)`,
     );
     if (this.chain.mode === "emulator") {
       await this.assignEmulatorWallets();
+    }
+    await this.recoverPendingMints();
+  }
+
+  /**
+   * Re-drive minting for attestations that never got a tx hash (crash
+   * between attest and mint, or a previous run's give-up). Only meaningful
+   * on a persistent chain: the emulator's ledger dies with its process, so
+   * there stale attestations are reported but unrecoverable.
+   */
+  private async recoverPendingMints(): Promise<void> {
+    const { rows } = await this.pool.query(
+      `SELECT deposit_id, payload FROM attestations
+        WHERE payload->>'tx_hash' IS NULL
+        ORDER BY transaction_id`,
+    );
+    if (rows.length === 0) return;
+    if (this.chain.mode !== "preview") {
+      this.log.warn(
+        `pipeline: ${rows.length} attested deposit(s) in the bank DB have no recorded mint; ` +
+          "the emulator chain is fresh, so they cannot be recovered (re-seed the database for a clean demo)",
+      );
+      return;
+    }
+    this.log.info(
+      `pipeline: recovering ${rows.length} attested-but-unminted deposit(s)`,
+    );
+    for (const row of rows) {
+      try {
+        await this.handleAttested(row.payload as SignedAttestation);
+      } catch (err) {
+        this.log.error(
+          `pipeline: recovery mint for deposit ${row.deposit_id} failed (will keep retrying up to the attempt cap on later boots): ${String(err)}`,
+        );
+      }
     }
   }
 
@@ -206,8 +253,10 @@ export class IssuanceService {
       const attempts = (this.mintAttempts.get(depositId) ?? 0) + 1;
       this.mintAttempts.set(depositId, attempts);
       if (attempts >= this.maxMintAttempts) {
+        this.mintAttempts.delete(depositId);
         this.log.error(
-          `pipeline: giving up on deposit ${depositId} after ${attempts} mint attempts: ${String(err)}`,
+          `pipeline: giving up on deposit ${depositId} after ${attempts} mint attempts ` +
+            `(a service restart retries it): ${String(err)}`,
         );
         return; // swallow: stop the redelivery loop for this attestation
       }
@@ -215,12 +264,30 @@ export class IssuanceService {
     }
   }
 
+  /** Run `fn` with exclusive access to the chain context's active wallet. */
+  private withChainLock<T>(fn: () => Promise<T>): Promise<T> {
+    const result = this.chainLock.then(fn);
+    this.chainLock = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
   /**
    * Mint the CDT for a signed attestation. Idempotent: if the bank DB
    * already records a mint tx hash for the deposit, or the vault already
-   * holds the deposit's asset, no second mint is attempted.
+   * holds the deposit's asset, no second mint is attempted. The tx hash is
+   * written back immediately after submission (before confirmation), so a
+   * confirmation timeout followed by a re-delivery cannot double-mint.
    */
-  async mintAttested(attestation: SignedAttestation): Promise<MintOutcome> {
+  mintAttested(attestation: SignedAttestation): Promise<MintOutcome> {
+    return this.withChainLock(() => this.mintAttestedLocked(attestation));
+  }
+
+  private async mintAttestedLocked(
+    attestation: SignedAttestation,
+  ): Promise<MintOutcome> {
     const { chain } = this;
     const payload = attestation.payload;
     const depositId = payload.deposit_id;
@@ -302,8 +369,11 @@ export class IssuanceService {
       .assemble([issuerWitness, oracleWitness])
       .complete();
     const txHash = await signed.submit();
-    await chain.awaitTx(txHash);
+    // Record the hash BEFORE awaiting confirmation: if confirmation times
+    // out and the watcher re-delivers, the DB guard above must already see
+    // the submitted tx or a second mint could race the first one.
     await this.writeMintTxHash(depositId, txHash, unit);
+    await chain.awaitTx(txHash);
 
     return {
       depositId,
@@ -328,14 +398,6 @@ export class IssuanceService {
     );
   }
 
-  /** Advance the emulator to `timeMs` (no-op on a real network / if already there). */
-  private ensureChainTime(timeMs: number): void {
-    const { emulator } = this.chain;
-    if (!emulator) return;
-    const delta = timeMs - emulator.now();
-    if (delta > 0) emulator.awaitSlot(Math.ceil(delta / 1000));
-  }
-
   /** Look up the (single) vault UTxO holding the deposit's CDT. */
   async findVaultUtxo(
     depositId: string,
@@ -356,7 +418,14 @@ export class IssuanceService {
    * signing with the member's key. This is the code path behind both the
    * redeem CLI and the control server.
    */
-  async redeem(options: {
+  redeem(options: {
+    depositId: string;
+    early?: boolean;
+  }): Promise<RedeemOutcome> {
+    return this.withChainLock(() => this.redeemLocked(options));
+  }
+
+  private async redeemLocked(options: {
     depositId: string;
     early?: boolean;
   }): Promise<RedeemOutcome> {
@@ -387,6 +456,18 @@ export class IssuanceService {
         `no signing key available for the CD owner (${datum.owner}); point CDT_MEMBER_SK_FILE at the member's key`,
       );
     }
+    // Fail fast with a clear error instead of submitting a transaction the
+    // vault validator will reject for a missing owner signature.
+    const memberVkh = CML.PrivateKey.from_bech32(memberKey)
+      .to_public()
+      .hash()
+      .to_hex();
+    if (memberVkh !== datum.owner) {
+      throw new Error(
+        `the member signing key (vkh ${memberVkh}) does not own this CD ` +
+          `(datum owner ${datum.owner}); point CDT_MEMBER_SK_FILE at the right member's key`,
+      );
+    }
     chain.selectWallet(memberKey);
 
     if (early) {
@@ -406,9 +487,10 @@ export class IssuanceService {
               }),
         withdrawAt,
       });
-      // The effective time is aligned UP to a slot boundary; on the emulator
-      // make sure the chain has reached it before submitting.
-      this.ensureChainTime(Number(built.validFrom));
+      // The effective time is aligned UP to a slot boundary; make sure the
+      // chain has reached it before submitting (advance the emulator, or
+      // sleep out the sub-slot remainder on a real network).
+      await chain.waitUntil(Number(built.validFrom));
       const signed = await built.tx.sign.withWallet().complete();
       const txHash = await signed.submit();
       await chain.awaitTx(txHash);
@@ -432,7 +514,7 @@ export class IssuanceService {
         this.log.info(
           `pipeline: advancing the emulator past maturity (${new Date(Number(datum.maturity)).toISOString()})`,
         );
-        this.ensureChainTime(Number(datum.maturity) + 1000);
+        await chain.waitUntil(Number(datum.maturity) + 1000);
       } else {
         throw new Error(
           `deposit ${depositId} matures at ${new Date(Number(datum.maturity)).toISOString()}; ` +
@@ -447,7 +529,7 @@ export class IssuanceService {
       vaultUtxo: utxo,
       ownerAddress,
     });
-    this.ensureChainTime(Number(built.validFrom));
+    await chain.waitUntil(Number(built.validFrom));
     const signed = await built.tx.sign.withWallet().complete();
     const txHash = await signed.submit();
     await chain.awaitTx(txHash);
@@ -485,8 +567,30 @@ export class IssuanceService {
    */
   async status(): Promise<StatusRow[]> {
     const { chain } = this;
+    // The three fetches are independent; run them concurrently.
+    const [vaultUtxos, attested, pending] = await Promise.all([
+      chain.lucid.utxosAt(chain.scripts.vaultAddress),
+      this.pool.query(
+        `SELECT a.deposit_id, a.payload, acc.member_name, p.name AS product_name
+           FROM attestations a
+           JOIN transactions t ON t.id = a.transaction_id
+           JOIN accounts acc   ON acc.id = t.account_id
+           LEFT JOIN cd_products p ON p.id = t.product_id
+          ORDER BY a.transaction_id`,
+      ),
+      this.pool.query(
+        `SELECT t.id, t.amount_cents, acc.member_name, p.name AS product_name,
+                p.rate_bps
+           FROM transactions t
+           JOIN accounts acc   ON acc.id = t.account_id
+           JOIN cd_products p  ON p.id = t.product_id
+          WHERE t.kind = 'deposit' AND t.attested = false AND acc.kind = 'cd_funding'
+          ORDER BY t.id`,
+      ),
+    ]);
+
     const onChain = new Map<string, CDDatum>();
-    for (const utxo of await chain.lucid.utxosAt(chain.scripts.vaultAddress)) {
+    for (const utxo of vaultUtxos) {
       try {
         const datum = readVaultDatum(utxo, chain.scripts);
         onChain.set(toText(datum.deposit_id), datum);
@@ -496,14 +600,6 @@ export class IssuanceService {
     }
 
     const rows: StatusRow[] = [];
-    const attested = await this.pool.query(
-      `SELECT a.deposit_id, a.payload, acc.member_name, p.name AS product_name
-         FROM attestations a
-         JOIN transactions t ON t.id = a.transaction_id
-         JOIN accounts acc   ON acc.id = t.account_id
-         LEFT JOIN cd_products p ON p.id = t.product_id
-        ORDER BY a.transaction_id`,
-    );
     const now = chain.now();
     for (const row of attested.rows) {
       // The stored JSONB is the whole SignedAttestation (CD terms nested
@@ -518,16 +614,18 @@ export class IssuanceService {
       let state: string;
       if (!mintTxHash && !minted) {
         state = "attested — mint pending";
+      } else if (redeemTxHash) {
+        // A recorded redemption wins even while the spent vault UTxO is
+        // still briefly observable (confirmation lag).
+        state =
+          stored.redeem_kind === "early_withdraw"
+            ? "early-withdrawn"
+            : "redeemed";
       } else if (minted) {
         state =
           now >= Number(terms.maturity)
             ? "minted — matured (redeemable)"
             : "minted — locked";
-      } else if (redeemTxHash) {
-        state =
-          stored.redeem_kind === "early_withdraw"
-            ? "early-withdrawn"
-            : "redeemed";
       } else {
         state = "redeemed (vault spent)";
       }
@@ -545,21 +643,12 @@ export class IssuanceService {
       });
     }
 
-    const pending = await this.pool.query(
-      `SELECT t.id, t.amount_cents, acc.member_name, p.name AS product_name,
-              p.rate_bps
-         FROM transactions t
-         JOIN accounts acc   ON acc.id = t.account_id
-         JOIN cd_products p  ON p.id = t.product_id
-        WHERE t.kind = 'deposit' AND t.attested = false AND acc.kind = 'cd_funding'
-        ORDER BY t.id`,
-    );
     for (const row of pending.rows) {
       rows.push({
         depositId: String(row.id),
         member: String(row.member_name),
         product: (row.product_name as string | null) ?? null,
-        principal: BigInt(row.amount_cents) * 10_000n,
+        principal: centsToLovelace(BigInt(row.amount_cents)),
         rateBps: Number(row.rate_bps),
         start: 0,
         maturity: 0,
