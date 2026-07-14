@@ -1,0 +1,26 @@
+{
+  "name": "@cdt/testnet",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Run the full Certificate of Deposit Token (CDT) lifecycle on the Cardano preview testnet and record verifiable evidence (tx hashes).",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "setup": "tsx src/setup.ts",
+    "fund": "tsx src/fund.ts",
+    "lifecycle": "tsx src/lifecycle.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cdt/txlib": "file:../cdt-txlib",
+    "@lucid-evolution/lucid": "^0.4.29"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.5.4"
+  }
+}
