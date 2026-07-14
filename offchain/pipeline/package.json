@@ -1,0 +1,37 @@
+{
+  "name": "@cdt/pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "CDT end-to-end issuance pipeline: wires the oracle watcher's attestations to on-chain CDT minting, plus redemption and status CLIs.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "postinstall": "node scripts/build-deps.mjs",
+    "pretest": "node scripts/build-deps.mjs",
+    "prestart": "node scripts/build-deps.mjs",
+    "start": "tsx src/cli.ts",
+    "redeem": "tsx src/redeem-cli.ts",
+    "status": "tsx src/status-cli.ts",
+    "keygen": "tsx src/keygen.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@lucid-evolution/lucid": "^0.4.29",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^3.1.1"
+  }
+}
