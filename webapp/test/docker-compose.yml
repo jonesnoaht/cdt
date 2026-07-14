@@ -1,0 +1,24 @@
+name: cdt-webapp-test
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: cdt-webapp-test-db
+    environment:
+      POSTGRES_USER: bank
+      POSTGRES_PASSWORD: bank
+      POSTGRES_DB: bank_sim
+    ports:
+      - "55435:5432"
+    volumes:
+      - ./fixtures/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    healthcheck:
+      # -h 127.0.0.1 forces TCP: the entrypoint's temporary initdb server only
+      # listens on the unix socket, so the check cannot report healthy before
+      # /docker-entrypoint-initdb.d/schema.sql has been applied.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U bank -d bank_sim"]
+      interval: 30s
+      timeout: 3s
+      retries: 15
+      start_period: 30s
+      start_interval: 1s
