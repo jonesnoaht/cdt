@@ -8,12 +8,10 @@
     "node": ">=22"
   },
   "scripts": {
-    "build:onchain": "node scripts/build-onchain.mjs",
-    "pretest": "npm run build:onchain",
-    "predemo": "npm run build:onchain",
-    "test": "vitest run",
-    "demo": "tsx src/demo.ts",
-    "typecheck": "tsc --noEmit"
+    "build:deps": "node scripts/build-deps.mjs",
+    "test": "node scripts/build-deps.mjs && vitest run",
+    "demo": "node scripts/build-deps.mjs && tsx src/demo.ts",
+    "typecheck": "node scripts/build-deps.mjs && tsc --noEmit"
   },
   "dependencies": {
     "@lucid-evolution/lucid": "^0.4.29"
@@ -23,5 +21,9 @@
     "tsx": "^4.19.0",
     "typescript": "^5.8.0",
     "vitest": "^3.1.0"
+  },
+  "optionalDependencies": {
+    "@cdt/credentials": "file:../../credentials",
+    "@cdt/txlib": "file:../cdt-txlib"
   }
 }

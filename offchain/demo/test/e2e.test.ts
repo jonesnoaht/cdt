@@ -1,5 +1,6 @@
 /**
- * End-to-end lifecycle tests on the in-process Lucid emulator.
+ * End-to-end lifecycle tests on the in-process Lucid emulator, against the
+ * REAL validators from the repository blueprint (onchain/plutus.json).
  *
  * Balance assertions are exact to the lovelace. Where tx fees would muddy a
  * raw wallet delta, we assert on the vault/mint amounts and on dedicated
@@ -9,23 +10,27 @@
 import { describe, expect, it } from "vitest";
 import { Data } from "@lucid-evolution/lucid";
 
-import { CDDatum, MintRedeemer, VaultRedeemer } from "../src/contracts.js";
 import {
   accrued,
   BPS_DENOMINATOR,
+  CDDatum,
   earlyPayout,
-  fullInterest,
-  maturePayout,
+  MintRedeemer,
   penaltyFee,
+  VaultRedeemer,
   YEAR_MS,
-} from "../src/interest.js";
+} from "@cdt/txlib";
+
 import {
   advancePast,
+  ceilToSlotBegin,
   circulatingSupply,
   depositIdToAssetName,
   earlyWithdrawCd,
   findVaultUtxo,
+  fullInterestOf,
   lovelaceAt,
+  maturePayoutOf,
   mintCd,
   redeemCd,
   setupChain,
@@ -62,26 +67,28 @@ describe("CDT lifecycle (emulator e2e)", () => {
     const vaultUtxo = await findVaultUtxo(ctx, cd.unit);
     const expectedInterest =
       (PRINCIPAL * RATE_BPS * TERM_MS) / (BPS_DENOMINATOR * YEAR_MS);
-    expect(fullInterest(cd.terms)).toBe(expectedInterest);
-    expect(vaultUtxo.assets.lovelace).toBe(PRINCIPAL + expectedInterest);
+    expect(fullInterestOf(cd.datum)).toBe(expectedInterest);
+    expect(vaultUtxo.assets["lovelace"]).toBe(PRINCIPAL + expectedInterest);
     expect(vaultUtxo.assets[cd.unit]).toBe(1n);
     expect(Data.from(vaultUtxo.datum!, CDDatum)).toEqual(cd.datum);
     expect(circulatingSupply(ctx, cd.unit)).toBe(1n);
 
-    // Past maturity, the member redeems.
-    advancePast(ctx, cd.terms.maturity);
+    // Past maturity, the member redeems (tx built by @cdt/txlib).
+    advancePast(ctx, cd.datum.maturity);
     const memberBefore = await lovelaceAt(ctx, ctx.member.account.address);
     const redemption = await redeemCd(ctx, cd);
     const memberAfter = await lovelaceAt(ctx, ctx.member.account.address);
 
     // Exact payout, exact wallet delta (vault release minus the tx fee),
     // token burned, vault emptied.
-    expect(redemption.payout).toBe(maturePayout(cd.terms));
+    expect(redemption.payout).toBe(maturePayoutOf(cd.datum));
     expect(redemption.payout).toBe(PRINCIPAL + expectedInterest);
+    // The slot-aligned validity bound is at/after maturity.
+    expect(redemption.at).toBeGreaterThanOrEqual(cd.datum.maturity);
     expect(memberAfter - memberBefore).toBe(cd.locked - redemption.fee);
     const memberUtxos = await ctx.lucid.utxosAt(ctx.member.account.address);
     expect(
-      memberUtxos.some((utxo) => utxo.assets.lovelace === redemption.payout),
+      memberUtxos.some((utxo) => utxo.assets["lovelace"] === redemption.payout),
     ).toBe(true);
     expect(circulatingSupply(ctx, cd.unit)).toBe(0n);
     await expect(
@@ -94,15 +101,38 @@ describe("CDT lifecycle (emulator e2e)", () => {
     const cd = await mintStandardCd(ctx);
 
     // Move to roughly mid-term.
-    advancePast(ctx, cd.terms.start + 60_000n);
-    const t = BigInt(ctx.emulator.now());
-    expect(t).toBeGreaterThanOrEqual(cd.terms.start);
-    expect(t).toBeLessThan(cd.terms.maturity);
+    advancePast(ctx, cd.datum.start + 60_000n);
+    // txlib semantics: amounts are computed at the slot-aligned lower bound.
+    const t = ceilToSlotBegin("Custom", BigInt(ctx.emulator.now()));
+    expect(t).toBeGreaterThanOrEqual(cd.datum.start);
+    expect(t).toBeLessThan(cd.datum.maturity);
 
-    const expectedAccrued = accrued(cd.terms, t);
-    const expectedFee = penaltyFee(expectedAccrued, PENALTY_BPS);
+    const expectedAccrued = accrued(
+      cd.datum.principal,
+      cd.datum.rate_bps,
+      cd.datum.start,
+      cd.datum.maturity,
+      t,
+    );
+    const expectedFee = penaltyFee(
+      cd.datum.principal,
+      cd.datum.rate_bps,
+      cd.datum.start,
+      cd.datum.maturity,
+      PENALTY_BPS,
+      t,
+    );
     const expectedPayout = PRINCIPAL + expectedAccrued - expectedFee;
-    expect(earlyPayout(cd.terms, t)).toBe(expectedPayout);
+    expect(
+      earlyPayout(
+        cd.datum.principal,
+        cd.datum.rate_bps,
+        cd.datum.start,
+        cd.datum.maturity,
+        PENALTY_BPS,
+        t,
+      ),
+    ).toBe(expectedPayout);
 
     const memberBefore = await lovelaceAt(ctx, ctx.member.account.address);
     const issuerBefore = await lovelaceAt(ctx, ctx.creditUnion.account.address);
@@ -111,6 +141,8 @@ describe("CDT lifecycle (emulator e2e)", () => {
     const issuerAfter = await lovelaceAt(ctx, ctx.creditUnion.account.address);
 
     expect(withdrawal.at).toBe(t);
+    expect(withdrawal.accrued).toBe(expectedAccrued);
+    expect(withdrawal.penalty).toBe(expectedFee);
     expect(withdrawal.payout).toBe(expectedPayout);
     // The validator demands at least the remainder back to the issuer; we pay
     // it in a dedicated output (topped up to min-ADA).
@@ -123,7 +155,7 @@ describe("CDT lifecycle (emulator e2e)", () => {
     );
     const memberUtxos = await ctx.lucid.utxosAt(ctx.member.account.address);
     expect(
-      memberUtxos.some((utxo) => utxo.assets.lovelace === withdrawal.payout),
+      memberUtxos.some((utxo) => utxo.assets["lovelace"] === withdrawal.payout),
     ).toBe(true);
     expect(circulatingSupply(ctx, cd.unit)).toBe(0n);
   });
@@ -133,12 +165,35 @@ describe("CDT lifecycle (emulator e2e)", () => {
     const cd = await mintStandardCd(ctx);
 
     // Only one block has passed; we are well before maturity.
-    expect(BigInt(ctx.emulator.now())).toBeLessThan(cd.terms.maturity);
-    await expect(redeemCd(ctx, cd)).rejects.toThrow();
+    const now = BigInt(ctx.emulator.now());
+    expect(now).toBeLessThan(cd.datum.maturity);
+
+    // txlib's builder refuses to even build a premature redemption ...
+    await expect(redeemCd(ctx, cd)).rejects.toThrow(/maturity/);
+
+    // ... and the validator itself rejects a hand-built one that sets its
+    // lower bound before maturity (the real on-chain code path).
+    const vaultUtxo = await findVaultUtxo(ctx, cd.unit);
+    const { lucid, member, contracts } = ctx;
+    lucid.selectWallet.fromPrivateKey(member.account.privateKey);
+    await expect(
+      lucid
+        .newTx()
+        .collectFrom([vaultUtxo], Data.to("Redeem", VaultRedeemer))
+        .attach.SpendingValidator(contracts.vaultValidator)
+        .mintAssets({ [cd.unit]: -1n }, Data.to("BurnCD", MintRedeemer))
+        .attach.MintingPolicy(contracts.mintPolicy)
+        .pay.ToAddress(member.account.address, {
+          lovelace: maturePayoutOf(cd.datum),
+        })
+        .addSigner(member.account.address)
+        .validFrom(Number(now))
+        .complete(),
+    ).rejects.toThrow();
 
     // The vault is untouched and the CDT still exists.
-    const vaultUtxo = await findVaultUtxo(ctx, cd.unit);
-    expect(vaultUtxo.assets.lovelace).toBe(cd.locked);
+    const untouched = await findVaultUtxo(ctx, cd.unit);
+    expect(untouched.assets["lovelace"]).toBe(cd.locked);
     expect(circulatingSupply(ctx, cd.unit)).toBe(1n);
   });
 
@@ -165,7 +220,7 @@ describe("CDT lifecycle (emulator e2e)", () => {
   it("rejects spending the vault without burning the CDT", async () => {
     const ctx = await setupChain();
     const cd = await mintStandardCd(ctx);
-    advancePast(ctx, cd.terms.maturity);
+    advancePast(ctx, cd.datum.maturity);
 
     const vaultUtxo = await findVaultUtxo(ctx, cd.unit);
     const { lucid, member, contracts } = ctx;
@@ -174,10 +229,10 @@ describe("CDT lifecycle (emulator e2e)", () => {
       lucid
         .newTx()
         .collectFrom([vaultUtxo], Data.to("Redeem", VaultRedeemer))
-        .attach.SpendingValidator(contracts.vaultScript)
+        .attach.SpendingValidator(contracts.vaultValidator)
         // token is kept, not burned — the validator must refuse
         .pay.ToAddress(member.account.address, {
-          lovelace: maturePayout(cd.terms),
+          lovelace: maturePayoutOf(cd.datum),
         })
         .addSigner(member.account.address)
         .validFrom(Number(ctx.emulator.now()))
@@ -189,7 +244,7 @@ describe("CDT lifecycle (emulator e2e)", () => {
     const ctx = await setupChain();
     const cdA = await mintStandardCd(ctx, depositIdToAssetName("CDT-test-A"));
     const cdB = await mintStandardCd(ctx, depositIdToAssetName("CDT-test-B"));
-    advancePast(ctx, cdB.terms.maturity);
+    advancePast(ctx, cdB.datum.maturity);
 
     const vaultA = await findVaultUtxo(ctx, cdA.unit);
     const vaultB = await findVaultUtxo(ctx, cdB.unit);
@@ -204,14 +259,14 @@ describe("CDT lifecycle (emulator e2e)", () => {
       lucid
         .newTx()
         .collectFrom([vaultA, vaultB], Data.to("Redeem", VaultRedeemer))
-        .attach.SpendingValidator(contracts.vaultScript)
+        .attach.SpendingValidator(contracts.vaultValidator)
         .mintAssets(
           { [cdA.unit]: -1n, [cdB.unit]: -1n },
           Data.to("BurnCD", MintRedeemer),
         )
-        .attach.MintingPolicy(contracts.mintScript)
+        .attach.MintingPolicy(contracts.mintPolicy)
         .pay.ToAddress(member.account.address, {
-          lovelace: maturePayout(cdA.terms) + maturePayout(cdB.terms),
+          lovelace: maturePayoutOf(cdA.datum) + maturePayoutOf(cdB.datum),
         })
         .addSigner(member.account.address)
         .validFrom(Number(ctx.emulator.now()))
