@@ -33,6 +33,7 @@ import {
 } from "./burn-validate.js";
 import type { SettlementRail } from "./settlement-rail.js";
 import { MockAchRail } from "./settlement-rail.js";
+import type { DepositRegistry } from "./deposit-registry.js";
 
 export interface PresentmentStoreOptions {
   pool?: pg.Pool;
@@ -47,6 +48,8 @@ export interface PresentmentStoreOptions {
   };
   /** Settlement payment rail (default MockAchRail). */
   settlementRail?: SettlementRail;
+  /** Off-chain one-shot deposit registry. */
+  depositRegistry?: DepositRegistry;
 }
 
 function toAuthDto(auth: SignedSettlementAuth): SignedSettlementAuthDto {
@@ -213,6 +216,8 @@ export class PresentmentStore {
   private readonly signer: SettlementSigner;
   private readonly burnValidation: PresentmentStoreOptions["burnValidation"];
   private readonly settlementRail: SettlementRail;
+  private readonly depositRegistry?: DepositRegistry;
+  private idempotencyIndex = new Map<string, number>();
 
   constructor(poolOrOpts?: pg.Pool | PresentmentStoreOptions, signer?: SettlementSigner) {
     if (poolOrOpts && typeof (poolOrOpts as pg.Pool).query === "function") {
@@ -220,12 +225,14 @@ export class PresentmentStore {
       this.signer = signer ?? new SettlementSigner();
       this.burnValidation = undefined;
       this.settlementRail = new MockAchRail();
+      this.depositRegistry = undefined;
     } else {
       const opts = (poolOrOpts as PresentmentStoreOptions | undefined) ?? {};
       this.pool = opts.pool;
       this.signer = opts.signer ?? signer ?? new SettlementSigner();
       this.burnValidation = opts.burnValidation;
       this.settlementRail = opts.settlementRail ?? new MockAchRail();
+      this.depositRegistry = opts.depositRegistry;
     }
   }
   /** Probe once whether the presentments table exists. */
@@ -588,6 +595,21 @@ export class PresentmentStore {
       };
     }
 
+    if (this.depositRegistry) {
+      const reg = await this.depositRegistry.recordBurned({
+        depositId,
+        burnTxHash: p.burnTxHash,
+        presentmentId: id,
+      });
+      if ("error" in reg) {
+        return {
+          error: reg.error,
+          status: reg.status as 409 | 422 | 500,
+          reasonCode: "TX_INVALID",
+        };
+      }
+    }
+
     const updated = await this.update(
       id,
       {
@@ -608,11 +630,47 @@ export class PresentmentStore {
   }
   async recordSettlementPayment(
     id: number,
-    payment: { amountCents: number; rail?: string; traceId?: string; paidAt?: string },
+    payment: {
+      amountCents: number;
+      rail?: string;
+      traceId?: string;
+      paidAt?: string;
+      idempotencyKey?: string;
+    },
     nowMs: number,
   ): Promise<PresentmentDto | { error: string; status: number }> {
     const p = await this.get(id);
     if (!p) return { error: "Presentment not found.", status: 404 };
+
+    const idem = payment.idempotencyKey?.trim();
+    if (idem) {
+      if (this.durable && this.pool) {
+        const { rows } = await this.pool.query(
+          `SELECT * FROM presentments WHERE idempotency_key = $1 LIMIT 1`,
+          [idem],
+        );
+        if (rows[0]) {
+          const existing = rowToDto(rows[0]);
+          if (existing.id !== id) {
+            return {
+              error: "Idempotency-Key already used for a different presentment.",
+              status: 409,
+            };
+          }
+          if (existing.status === "settled") return existing;
+        }
+      } else {
+        const mapped = this.idempotencyIndex.get(idem);
+        if (mapped !== undefined && mapped !== id) {
+          return {
+            error: "Idempotency-Key already used for a different presentment.",
+            status: 409,
+          };
+        }
+        if (mapped === id && p.status === "settled") return p;
+      }
+    }
+
     if (p.status !== "burn_accepted") {
       return {
         error: `SettlementPayment only after burn_accepted (status=${p.status}).`,
@@ -669,8 +727,9 @@ export class PresentmentStore {
       },
       {
         eventType: "settlement_payment",
-        detail: { rail, traceId, amountCents: payment.amountCents },
+        detail: { rail, traceId, amountCents: payment.amountCents, idempotencyKey: idem },
       },
+      idem,
     );
   }
 
@@ -728,6 +787,7 @@ export class PresentmentStore {
     id: number,
     patch: Partial<PresentmentDto>,
     event?: { eventType: string; detail?: unknown; actor?: string },
+    idempotencyKey?: string,
   ): Promise<PresentmentDto> {
     if (this.durable && this.pool) {
       const current = await this.get(id);
@@ -743,6 +803,7 @@ export class PresentmentStore {
            burn_tx_hash = $7,
            burn_mode = $8,
            settlement_payment = $9::jsonb,
+           idempotency_key = COALESCE($10, idempotency_key),
            updated_at = now()
          WHERE id = $1
          RETURNING *`,
@@ -756,6 +817,7 @@ export class PresentmentStore {
           next.burnTxHash ?? null,
           next.burnMode ?? null,
           next.settlementPayment ? JSON.stringify(next.settlementPayment) : null,
+          idempotencyKey ?? null,
         ],
       );
       const dto = rowToDto(rows[0]);
@@ -783,6 +845,7 @@ export class PresentmentStore {
     if (!current) throw new Error(`presentment ${id} missing`);
     const next = { ...current, ...patch };
     this.byId.set(id, next);
+    if (idempotencyKey) this.idempotencyIndex.set(idempotencyKey, id);
     if (event && current.status !== next.status) {
       const list = this.memoryEvents.get(id) ?? [];
       list.push({

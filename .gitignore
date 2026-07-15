@@ -8,3 +8,8 @@ artifacts/
 .claude/
 dist-newstyle/
 *~
+
+# Pilot key ceremony output
+keys-pilot/
+**/keys-pilot/
+*.private.pem

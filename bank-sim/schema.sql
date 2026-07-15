@@ -112,3 +112,32 @@ CREATE TABLE IF NOT EXISTS presentment_events (
 CREATE INDEX IF NOT EXISTS idx_presentment_events_presentment
   ON presentment_events (presentment_id, id);
 
+-- Network-wide one-shot registry for deposit lifecycle (off-chain until on-chain registry exists).
+-- States: attested → minted → burned (terminal). Prevents double-mint / double-burn at the issuer DB.
+CREATE TABLE IF NOT EXISTS deposit_registry (
+  deposit_id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL DEFAULT '',
+  attestation_hash TEXT NOT NULL DEFAULT '',
+  state TEXT NOT NULL CHECK (state IN ('attested', 'minted', 'burned')),
+  mint_tx_hash TEXT,
+  burn_tx_hash TEXT,
+  presentment_id INT REFERENCES presentments (id),
+  meta JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_deposit_registry_mint_tx
+  ON deposit_registry (mint_tx_hash)
+  WHERE mint_tx_hash IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_deposit_registry_burn_tx
+  ON deposit_registry (burn_tx_hash)
+  WHERE burn_tx_hash IS NOT NULL;
+
+-- Idempotent settlement payments (client Idempotency-Key).
+ALTER TABLE presentments ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_presentments_idempotency
+  ON presentments (idempotency_key)
+  WHERE idempotency_key IS NOT NULL AND idempotency_key <> '';
+

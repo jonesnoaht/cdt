@@ -26,6 +26,7 @@ import {
   defaultIssuerName,
   lookupClaim,
 } from "./presentments.js";
+import { DepositRegistry } from "./deposit-registry.js";
 import { PaymentOracle } from "./payment-oracle.js";
 import {
   isPublicPath,
@@ -127,6 +128,8 @@ export interface AppOptions {
   correspondentApiKey?: string;
   /** HS256 secret for institutional JWTs. */
   jwtSecret?: string;
+  /** Optional deposit registry (tests inject). */
+  depositRegistry?: DepositRegistry;
 }
 
 interface MemberIdentity {
@@ -159,6 +162,8 @@ export function createApp(options: AppOptions): Hono {
   const { pool } = options;
   const now = options.now ?? Date.now;
   const koiosBaseUrl = options.koiosBaseUrl ?? "https://preview.koios.rest/api/v1";
+  const depositRegistry = options.depositRegistry ?? new DepositRegistry(pool);
+  void depositRegistry.init();
   const presentments =
     options.presentmentStore ??
     new PresentmentStore({
@@ -171,6 +176,7 @@ export function createApp(options: AppOptions): Hono {
         fetchImpl: options.fetchImpl,
       },
       settlementRail: options.settlementRail,
+      depositRegistry,
     });
   void presentments.init();
   const paymentOracle = options.paymentOracle ?? new PaymentOracle();
@@ -697,6 +703,8 @@ export function createApp(options: AppOptions): Hono {
     if (typeof body.amountCents !== "number") {
       return c.json({ error: "amountCents is required (rail/traceId optional — mock ACH fills them)." }, 400);
     }
+    const idempotencyKey =
+      c.req.header("idempotency-key") ?? c.req.header("x-idempotency-key") ?? undefined;
     const result = await presentments.recordSettlementPayment(
       id,
       {
@@ -704,13 +712,22 @@ export function createApp(options: AppOptions): Hono {
         rail: body.rail,
         traceId: body.traceId,
         paidAt: body.paidAt,
+        idempotencyKey,
       },
       now(),
     );
     if ("error" in result) {
-      return c.json({ error: result.error }, result.status as 404 | 422);
+      return c.json({ error: result.error }, result.status as 404 | 409 | 422);
     }
     return c.json(result);
+  });
+
+  app.get("/api/deposit-registry/:depositId", async (c) => {
+    const depositId = c.req.param("depositId")?.trim();
+    if (!depositId) return c.json({ error: "depositId required." }, 400);
+    const row = await depositRegistry.get(depositId);
+    if (!row) return c.json({ error: "Not in registry." }, 404);
+    return c.json(row);
   });
 
   // --- Payment terminal: opt-in oracle attestation check (free-spend CDT) ----

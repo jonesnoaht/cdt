@@ -17,6 +17,7 @@
     "smoke": "tsx scripts/smoke.ts",
     "smoke:settlement": "tsx scripts/smoke-settlement.ts",
     "check:prod-env": "tsx scripts/check-production-env.ts",
+    "keygen:pilot": "tsx scripts/keygen-pilot.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
