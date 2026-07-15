@@ -156,6 +156,32 @@ paths:
       responses:
         "200":
           description: settled
+
+  /api/presentments/{id}/events:
+    get:
+      summary: List presentment transition audit events
+      parameters:
+        - $ref: '#/components/parameters/PresentmentId'
+      responses:
+        '200':
+          description: Ordered state transition events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: integer }
+                    fromStatus: { type: string, nullable: true }
+                    toStatus: { type: string }
+                    eventType: { type: string }
+                    detail: { type: object }
+                    actor: { type: string }
+                    createdAt: { type: string, format: date-time }
+        '404':
+          description: Not found
+
 components:
   parameters:
     PresentmentId:

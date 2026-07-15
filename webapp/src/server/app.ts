@@ -501,6 +501,14 @@ export function createApp(options: AppOptions): Hono {
     return c.json(row);
   });
 
+  app.get("/api/presentments/:id/events", async (c) => {
+    const id = parseIdParam(c.req.param("id"));
+    if (id === null) return c.json({ error: "Invalid presentment id." }, 400);
+    const row = await presentments.get(id);
+    if (!row) return c.json({ error: "Presentment not found." }, 404);
+    return c.json(await presentments.listEvents(id));
+  });
+
   app.post("/api/presentments", async (c) => {
     let body: unknown;
     try {
@@ -549,7 +557,7 @@ export function createApp(options: AppOptions): Hono {
     const result = await presentments.submitBurnEvidence(id, {
       txHash: body.txHash,
       mode: body.mode,
-    });
+    }, now());
     if ("error" in result) {
       return c.json({ error: result.error }, result.status as 400 | 404 | 409 | 422);
     }
@@ -560,7 +568,7 @@ export function createApp(options: AppOptions): Hono {
   app.post("/api/presentments/:id/accept-burn", async (c) => {
     const id = parseIdParam(c.req.param("id"));
     if (id === null) return c.json({ error: "Invalid presentment id." }, 400);
-    const result = await presentments.acceptBurn(id);
+    const result = await presentments.acceptBurn(id, now());
     if ("error" in result) {
       return c.json(
         { error: result.error, reasonCode: "reasonCode" in result ? result.reasonCode : undefined },

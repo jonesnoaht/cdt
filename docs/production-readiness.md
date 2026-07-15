@@ -71,7 +71,9 @@ Terminate TLS at a reverse proxy; never expose Postgres or the API on a public i
 
 | Gap | Why | Status |
 | --- | --- | --- |
-| **Hyperledger Identus / did:prism** | Replace mock DID/VC | **Skeleton:** `credentials/src/identus.ts` (`IDENTUS_MODE=mock\|http`) |
+| **Hyperledger Identus / did:prism** | Replace mock DID/VC | **HTTP client:** `HttpIdentusAgent` → `/health`, `/v1/presentations/verify`, `/v1/credentials/account-holder` (`IDENTUS_MODE=http`) |
+| **Settlement audit** | Immutable transition log | **Done:** `presentment_events` + `GET /api/presentments/:id/events` |
+| **SettlementAuth binding** | Auth must match claim + stay valid | **Done:** deposit_id match + signature/TTL re-check on burn + accept |
 | **On-chain burn validation** | Prove burn tx burns deposit CDT | **Done (Koios):** `BURN_VALIDATE_MODE=strict` + `CHAIN_PROVIDER=koios-preview`; optional `CDT_POLICY_ID` |
 | **ACH/FedNow integration** | SettlementPayment is an audit record | **Mock rail:** `SETTLEMENT_RAIL=mock\|log\|none` (`settlement-rail.ts`) |
 | **Oracle VC path** | Fail-closed / accept-all | **credentials mode** enrolls bank DIDs via `@cdt/credentials` (`BankCredentialDirectory`) |

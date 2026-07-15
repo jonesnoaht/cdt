@@ -428,20 +428,25 @@ export class PresentmentStore {
       cashOutMode: p.cashOutMode,
       nowMs,
     });
-    return this.update(id, {
-      status: "authorized",
-      settlementAuth: toAuthDto(auth),
-      nextSteps: [
-        "SettlementAuth issued — verify signature with issuer public key.",
-        "Burn CDT (Redeem / EarlyWithdraw) with holder co-sign.",
-        "POST BurnEvidence with the Cardano tx hash.",
-      ],
-    });
+    return this.update(
+      id,
+      {
+        status: "authorized",
+        settlementAuth: toAuthDto(auth),
+        nextSteps: [
+          "SettlementAuth issued — verify signature with issuer public key.",
+          "Burn CDT (Redeem / EarlyWithdraw) with holder co-sign.",
+          "POST BurnEvidence with the Cardano tx hash.",
+        ],
+      },
+      { eventType: "authorize", detail: { presentment_id: auth.payload.presentment_id } },
+    );
   }
 
   async submitBurnEvidence(
     id: number,
     body: { txHash: string; mode?: string },
+    nowMs: number = Date.now(),
   ): Promise<PresentmentDto | { error: string; status: number }> {
     const p = await this.get(id);
     if (!p) return { error: "Presentment not found.", status: 404 };
@@ -464,6 +469,26 @@ export class PresentmentStore {
     if (!p.settlementAuth) {
       return { error: "Missing SettlementAuth on presentment.", status: 422 };
     }
+    const authDeposit = p.settlementAuth.payload.deposit_id;
+    const claimDeposit = p.depositId ?? String(p.transactionId);
+    if (authDeposit !== claimDeposit) {
+      return {
+        error: `SettlementAuth deposit_id (${authDeposit}) does not match presentment (${claimDeposit}).`,
+        status: 422,
+      };
+    }
+    const authCheck = this.signer.verify(
+      {
+        payload: p.settlementAuth.payload,
+        signature: p.settlementAuth.signature,
+        algorithm: p.settlementAuth.algorithm,
+        publicKeySpkiBase64: p.settlementAuth.publicKeySpkiBase64,
+      },
+      nowMs,
+    );
+    if (!authCheck.ok) {
+      return { error: `SettlementAuth invalid: ${authCheck.reason}`, status: 422 };
+    }
     const mode =
       body.mode === "redeem" || body.mode === "mature"
         ? "redeem"
@@ -475,15 +500,19 @@ export class PresentmentStore {
 
     // Unique burn: one tx_hash per presentment network-wide (durable UNIQUE).
     try {
-      return await this.update(id, {
-        status: "burn_submitted",
-        burnTxHash: txHash,
-        burnMode: mode,
-        nextSteps: [
-          "BurnEvidence recorded — issuer validates on-chain / indexer.",
-          "Await BurnAccepted then SettlementPayment.",
-        ],
-      });
+      return await this.update(
+        id,
+        {
+          status: "burn_submitted",
+          burnTxHash: txHash,
+          burnMode: mode,
+          nextSteps: [
+            "BurnEvidence recorded — issuer validates on-chain / indexer.",
+            "Await BurnAccepted then SettlementPayment.",
+          ],
+        },
+        { eventType: "burn_evidence", detail: { txHash, mode } },
+      );
     } catch (err) {
       const msg = String(err);
       if (/unique|duplicate/i.test(msg)) {
@@ -498,6 +527,7 @@ export class PresentmentStore {
 
   async acceptBurn(
     id: number,
+    nowMs: number = Date.now(),
   ): Promise<
     | (PresentmentDto & { burnValidation?: BurnValidateResult })
     | { error: string; status: number; reasonCode?: string }
@@ -510,8 +540,35 @@ export class PresentmentStore {
     if (!p.burnTxHash) {
       return { error: "No burn tx hash on presentment.", status: 422 };
     }
+    if (!p.settlementAuth) {
+      return { error: "Missing SettlementAuth.", status: 422 };
+    }
+    const authCheck = this.signer.verify(
+      {
+        payload: p.settlementAuth.payload,
+        signature: p.settlementAuth.signature,
+        algorithm: p.settlementAuth.algorithm,
+        publicKeySpkiBase64: p.settlementAuth.publicKeySpkiBase64,
+      },
+      nowMs,
+    );
+    if (!authCheck.ok) {
+      return {
+        error: `SettlementAuth invalid at accept: ${authCheck.reason}`,
+        status: 422,
+        reasonCode: "AUTH_EXPIRED",
+      };
+    }
 
-    const depositId = p.depositId ?? String(p.transactionId);
+    const depositId = p.settlementAuth.payload.deposit_id;
+    const claimDeposit = p.depositId ?? String(p.transactionId);
+    if (depositId !== claimDeposit) {
+      return {
+        error: "SettlementAuth deposit_id mismatch at accept-burn.",
+        status: 422,
+        reasonCode: "TX_INVALID",
+      };
+    }
     const bv = this.burnValidation;
     const validation = await validateBurnTx({
       provider: bv?.provider,
@@ -531,15 +588,22 @@ export class PresentmentStore {
       };
     }
 
-    const updated = await this.update(id, {
-      status: "burn_accepted",
-      nextSteps: [
-        validation.onChain
-          ? `Burn accepted on-chain (${validation.burnedQuantity ?? "qty n/a"}). Issuer closes deposit on core.`
-          : "Burn accepted (lab / soft validation). Issuer closes deposit on core.",
-        "Record SettlementPayment (ACH/wire) to complete.",
-      ],
-    });
+    const updated = await this.update(
+      id,
+      {
+        status: "burn_accepted",
+        nextSteps: [
+          validation.onChain
+            ? `Burn accepted on-chain (${validation.burnedQuantity ?? "qty n/a"}). Issuer closes deposit on core.`
+            : "Burn accepted (lab / soft validation). Issuer closes deposit on core.",
+          "Record SettlementPayment (ACH/wire) to complete.",
+        ],
+      },
+      {
+        eventType: "burn_accepted",
+        detail: { burnValidation: validation, depositId },
+      },
+    );
     return { ...updated, burnValidation: validation };
   }
   async recordSettlementPayment(
@@ -591,20 +655,79 @@ export class PresentmentStore {
       paidAt = railResult.paidAt;
     }
 
-    return this.update(id, {
-      status: "settled",
-      settlementPayment: {
-        amountCents: payment.amountCents,
-        rail,
-        traceId,
-        paidAt: paidAt ?? new Date(nowMs).toISOString(),
+    return this.update(
+      id,
+      {
+        status: "settled",
+        settlementPayment: {
+          amountCents: payment.amountCents,
+          rail,
+          traceId,
+          paidAt: paidAt ?? new Date(nowMs).toISOString(),
+        },
+        nextSteps: ["Settled. Terminal state."],
       },
-      nextSteps: ["Settled. Terminal state."],
-    });
+      {
+        eventType: "settlement_payment",
+        detail: { rail, traceId, amountCents: payment.amountCents },
+      },
+    );
   }
+
+  async listEvents(presentmentId: number): Promise<
+    Array<{
+      id: number;
+      fromStatus: string | null;
+      toStatus: string;
+      eventType: string;
+      detail: unknown;
+      actor: string;
+      createdAt: string;
+    }>
+  > {
+    if (this.durable && this.pool) {
+      try {
+        const { rows } = await this.pool.query(
+          `SELECT id, from_status, to_status, event_type, detail, actor, created_at
+             FROM presentment_events
+            WHERE presentment_id = $1
+            ORDER BY id ASC`,
+          [presentmentId],
+        );
+        return rows.map((r) => ({
+          id: Number(r.id),
+          fromStatus: r.from_status != null ? String(r.from_status) : null,
+          toStatus: String(r.to_status),
+          eventType: String(r.event_type),
+          detail: r.detail,
+          actor: String(r.actor),
+          createdAt: new Date(r.created_at as string | Date).toISOString(),
+        }));
+      } catch {
+        return [];
+      }
+    }
+    return this.memoryEvents.get(presentmentId) ?? [];
+  }
+
+  private memoryEvents = new Map<
+    number,
+    Array<{
+      id: number;
+      fromStatus: string | null;
+      toStatus: string;
+      eventType: string;
+      detail: unknown;
+      actor: string;
+      createdAt: string;
+    }>
+  >();
+  private memoryEventSeq = 1;
+
   private async update(
     id: number,
     patch: Partial<PresentmentDto>,
+    event?: { eventType: string; detail?: unknown; actor?: string },
   ): Promise<PresentmentDto> {
     if (this.durable && this.pool) {
       const current = await this.get(id);
@@ -635,12 +758,44 @@ export class PresentmentStore {
           next.settlementPayment ? JSON.stringify(next.settlementPayment) : null,
         ],
       );
-      return rowToDto(rows[0]);
+      const dto = rowToDto(rows[0]);
+      if (event && current.status !== dto.status) {
+        try {
+          await this.pool.query(
+            `INSERT INTO presentment_events (presentment_id, from_status, to_status, event_type, detail, actor)
+             VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
+            [
+              id,
+              current.status,
+              dto.status,
+              event.eventType,
+              JSON.stringify(event.detail ?? {}),
+              event.actor ?? "system",
+            ],
+          );
+        } catch {
+          // presentment_events may be missing on older volumes
+        }
+      }
+      return dto;
     }
     const current = this.byId.get(id);
     if (!current) throw new Error(`presentment ${id} missing`);
     const next = { ...current, ...patch };
     this.byId.set(id, next);
+    if (event && current.status !== next.status) {
+      const list = this.memoryEvents.get(id) ?? [];
+      list.push({
+        id: this.memoryEventSeq++,
+        fromStatus: current.status,
+        toStatus: next.status,
+        eventType: event.eventType,
+        detail: event.detail ?? {},
+        actor: event.actor ?? "system",
+        createdAt: new Date().toISOString(),
+      });
+      this.memoryEvents.set(id, list);
+    }
     return next;
   }
 }
