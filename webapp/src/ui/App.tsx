@@ -7,6 +7,8 @@ import { CdDetail } from "./pages/CdDetail.js";
 import { Dashboard } from "./pages/Dashboard.js";
 import { MemberPicker } from "./pages/MemberPicker.js";
 import { OpenCd } from "./pages/OpenCd.js";
+import { PresentForeign } from "./pages/PresentForeign.js";
+import { PaymentTerminal } from "./pages/PaymentTerminal.js";
 
 export const BRAND_NAME = import.meta.env.VITE_BRAND_NAME || "CampusUSA Credit Union";
 
@@ -16,6 +18,8 @@ type Route =
   | { page: "dashboard" }
   | { page: "cd"; txId: number }
   | { page: "open" }
+  | { page: "present" }
+  | { page: "pay" }
   | { page: "about" };
 
 function parseRoute(hash: string): Route {
@@ -23,6 +27,8 @@ function parseRoute(hash: string): Route {
   const cd = path.match(/^\/cd\/(\d+)$/);
   if (cd) return { page: "cd", txId: Number(cd[1]) };
   if (path === "/open") return { page: "open" };
+  if (path === "/present") return { page: "present" };
+  if (path === "/pay") return { page: "pay" };
   if (path === "/about") return { page: "about" };
   return { page: "dashboard" };
 }
@@ -84,7 +90,13 @@ export function App() {
             Certificates
           </a>
           <a href="#/open" className={route.page === "open" ? "is-active" : ""}>
-            Open a certificate
+            Tokenize a CD
+          </a>
+          <a href="#/present" className={route.page === "present" ? "is-active" : ""}>
+            Foreign CDT cash-out
+          </a>
+          <a href="#/pay" className={route.page === "pay" ? "is-active" : ""}>
+            Payment terminal
           </a>
           <a href="#/about" className={route.page === "about" ? "is-active" : ""}>
             How it works
@@ -107,6 +119,10 @@ export function App() {
           <Spinner />
         ) : route.page === "about" ? (
           <About />
+        ) : route.page === "present" ? (
+          <PresentForeign />
+        ) : route.page === "pay" ? (
+          <PaymentTerminal />
         ) : member === null ? (
           <MemberPicker members={members} onSelect={selectMember} />
         ) : route.page === "cd" ? (
@@ -122,7 +138,8 @@ export function App() {
         <p>
           Deposits are held at the credit union and federally insured by the NCUA up to
           applicable limits. Certificate tokens are a record of ownership — your money never
-          leaves the credit union. Demonstration environment; not real accounts.
+          leaves the credit union. Demonstration environment; not real accounts. Correspondent
+          cash advances against foreign CDTs are uninsured receivables until the issuer settles.
         </p>
       </footer>
     </div>

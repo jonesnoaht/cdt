@@ -89,7 +89,7 @@ by Hyperledger Identus, which is the production path; this repo ships a mock
 | `offchain/demo/` | Flagship narrated demo of the full CD lifecycle on a local Lucid emulator (`npm run demo`). |
 | `bank-sim/` | Postgres bank simulator (schema + seed data) via Docker, on port 55432. |
 | `credentials/` | Mock `did:key` DIDs and W3C verifiable credentials (production path: Hyperledger Identus). |
-| `docs/` | Architecture, proposal, why-Cardano comparison, compliance, feasibility, and rollout analysis. |
+| `docs/` | Whitepaper, architecture, proposal, network settlement package, compliance, feasibility, rollout. |
 | `legacy/` | The original 2021 material (Plutus/Haskell experiments and planning docs), kept for provenance. |
 | `.github/workflows/` | CI: Aiken checks and package tests. |
 
@@ -132,9 +132,10 @@ runs against an in-process emulator with mock credentials; there is no
 deployed mainnet contract, no real bank integration, and no regulatory
 approval. Nothing in this repository is legal or financial advice.
 
-- Business, compliance, and feasibility analysis: see `docs/`
-  (`architecture.md`, `proposal.md`, `why-cardano.md`, `compliance.md`,
-  `feasibility.md`, `rollout.md`).
+- Whitepaper and analysis: see `docs/`
+  (`whitepaper.md`, `architecture.md`, `proposal.md`, `network/` settlement
+  package, `security-audit.md`, `why-cardano.md`, `compliance.md`,
+  `feasibility.md`, `rollout.md`, `payment-check-contract.md`).
 - The 2021 origins (Plutus/Haskell prototypes, meeting notes, Catalyst
   proposal drafts): see `legacy/`.
 

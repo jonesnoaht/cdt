@@ -2,7 +2,9 @@
 
 The member-facing web portal for the Certificate of Deposit Token (CDT) demo.
 A credit-union member can browse CD ("share certificate") rates, open a
-certificate, watch it move from **pending** → **active** (attested & tokenized)
+certificate through the **bank tokenization wizard** (CIP checklist → product &
+amount including $250k → disclosures → book on core → live attest/mint status),
+watch it move from **pending** → **active** (attested & tokenized)
 → **matured**, and explore early-withdrawal math that is computed by the exact
 same `@cdt/txlib` interest code that mirrors the on-chain validator.
 
@@ -30,9 +32,10 @@ cd ../webapp
 npm ci
 npm run dev
 
-# 3. Open http://localhost:5173 and pick a member
+# 3. Open http://localhost:5173
+#    - Tokenize a CD  → issuing CU desk
+#    - Foreign CDT cash-out → correspondent CU desk (no member login required)
 ```
-
 Seeded CDs appear as **pending** until the oracle watcher attests them (run it
 from `offchain/oracle-watcher` if you want to see the full lifecycle live).
 
@@ -63,8 +66,18 @@ endpoint returns `{ "available": false }` gracefully.
 | `GET /api/products`              | CD catalog with APY computed from `rate_bps`                                                                                              |
 | `GET /api/members`               | Members for the demo login picker                                                                                                         |
 | `GET /api/members/:id/accounts`  | The member's accounts with balances                                                                                                       |
+| `GET /api/members/:id/tokenize-prep` | Bank desk prep: identity, CD funding account, CIP checklist, disclosures, amount presets (incl. $250k)                                  |
 | `GET /api/members/:id/cds`       | The member's CDs joined with attestations: derived status (pending / active / matured), terms, tx hash, and txlib-computed projections (`?curve=1` adds the payout curve) |
 | `POST /api/members/:id/deposits` | Open a CD: `{ productId, amountCents }`, validated against the product minimum                                                            |
+| `GET /api/correspondent/meta`    | Presenting CU name (demo: Gulfside) vs issuer (CampusUSA)                                                                               |
+| `GET /api/claims/:ref`           | Lookup a foreign CDT claim by deposit id / tx id for correspondent cash-out                                                             |
+| `GET /api/presentments`          | List cash-advance presentments filed at this desk                                                                                       |
+| `POST /api/presentments`         | File presentment: CIP checks + advance cash + settlement instructions to issuer                                                         |
+| `GET /api/payment/contract`      | Payment-check contract surface (`cdt.payment_check.v1`, freely spendable)                                                               |
+| `GET /api/payment/oracle-pubkey` | Pin the payment-oracle Ed25519 key                                                                                                      |
+| `POST /api/payment/challenge`    | One-time challenge for payment verify                                                                                                   |
+| `POST /api/payment/verify`       | Oracle attestation check for a claim (opt-in terminal security)                                                                         |
+| `POST /api/payment/verify-signature` | Re-verify a signed payment check                                                                                                    |
 | `GET /api/cds/:depositId/chain`  | Optional on-chain lookup (Koios preview); `{ available: false }` when offline                                                             |
 
 `:id` is any account id belonging to the member (the picker uses the smallest).

@@ -75,7 +75,7 @@ export function Dashboard({ member }: { member: MemberDto }) {
           <p className="lede">Share certificates held by {member.memberName}</p>
         </div>
         <a className="button" href="#/open">
-          Open a certificate
+          Tokenize a CD
         </a>
       </div>
 
@@ -104,7 +104,7 @@ export function Dashboard({ member }: { member: MemberDto }) {
             Open one in about a minute.
           </p>
           <a className="button" href="#/open">
-            Browse certificate rates
+            Tokenize a certificate
           </a>
         </div>
       ) : (
