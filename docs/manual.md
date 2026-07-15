@@ -146,15 +146,26 @@ Exit `0` means pilot gates clear — **not** a formal certification.
 
 ## 5. Bank desks (product UX)
 
-### 5.1 Issuer — tokenize a CD (`#/open`)
+### 5.1 Issuer — buy CD / deliver to Lace (`#/open`)
 
-**CampusUSA** desk. Sequence: CIP → product/amount → book `cd_funding` on core → oracle attests → pipeline mints.
+**CampusUSA** desk. **Product position:** member logs into the CU, buys a share
+certificate as CDT, and holds control in **Lace** (CIP-30). See
+[product-position.md](./product-position.md).
+
+Sequence:
+
+1. CU member session (demo picker / production SSO)
+2. **Connect Lace** — destination wallet for certificate control
+3. CIP checklist → product/amount → disclosures
+4. Book `cd_funding` on core → oracle attests → mint
+5. Track delivery; redeem/burn later via Lace on `#/sign`
 
 | Piece | Location |
 | --- | --- |
 | UI | `webapp/src/ui/pages/OpenCd.tsx` |
 | Prep | `GET /api/members/:id/tokenize-prep` |
 | Book | `POST /api/members/:id/deposits` |
+| CIP-30 | `webapp/src/ui/cip30.ts` (shared with `#/sign`) |
 
 $250,000 = `25_000_000` cents. Surface NCUA share-insurance notes when amounts approach SMSIA; **the token is not NCUSIF insurance**.
 

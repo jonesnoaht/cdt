@@ -100,6 +100,10 @@ const TOKENIZE_DISCLOSURES: TokenizePrepDto["disclosures"] = [
     text: "CDT units are freely transferable native assets. Payment terminals should optionally call the payment-oracle verification contract (challenge → verify → check signature) before accepting a CDT as consideration; that check does not freeze or lock the token.",
   },
   {
+    id: "wallet_delivery",
+    text: "After purchase, certificate control is delivered to the member’s browser wallet (Lace preferred via CIP-30). The member must safeguard those keys. Loss of wallet keys may require CU re-verification and reissue; the insured deposit remains on the core.",
+  },
+  {
     id: "core_authoritative",
     text: "The core banking ledger remains the system of record for the insured claim. If a token is lost, the credit union can re-verify the member and reissue after invalidating the stranded token.",
   },

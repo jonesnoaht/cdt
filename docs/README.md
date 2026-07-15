@@ -5,6 +5,7 @@ Start here if you are new to the repo.
 | Document | Audience | Purpose |
 | --- | --- | --- |
 | **[Operator & demo manual](./manual.md)** | Engineers, CU ops, demos | Run the stack, use desks, env vars, smoke tests |
+| **[Product position](./product-position.md)** | Product / leadership / desks | **CU login → buy CDT → Lace wallet** (canonical pitch) |
 | [Whitepaper](./whitepaper.md) | Product / leadership | Full product thesis |
 | [Architecture](./architecture.md) | Engineers | On-chain + off-chain design |
 | [Compliance](./compliance.md) | Risk / compliance | CIP, BSA, NCUSIF framing |

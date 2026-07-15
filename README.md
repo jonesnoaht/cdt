@@ -148,6 +148,7 @@ approval. Nothing in this repository is legal or financial advice.
 | Doc | Purpose |
 | --- | --- |
 | [docs/manual.md](docs/manual.md) | **Operator & demo manual** (run, desks, env, smoke) |
+| [docs/product-position.md](docs/product-position.md) | **CU login → buy CDT → Lace** (product pitch) |
 | [docs/README.md](docs/README.md) | Full documentation index |
 | [docs/whitepaper.md](docs/whitepaper.md) | Product thesis |
 | [docs/architecture.md](docs/architecture.md) | System design |

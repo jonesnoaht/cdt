@@ -9,17 +9,22 @@ import type {
 import { ApiRequestError, api } from "../api.js";
 import { ErrorNote, Spinner, StatusBadge } from "../components.js";
 import { money, percentFromBps, shortHash, termLabel } from "../format.js";
+import {
+  detectCip30Wallets,
+  type Cip30WalletApi,
+  type DetectedWallet,
+} from "../cip30.js";
 
 type WizardStep = "cip" | "product" | "disclosures" | "confirm" | "track";
 
 const STEP_ORDER: WizardStep[] = ["cip", "product", "disclosures", "confirm", "track"];
 
 const STEP_LABEL: Record<WizardStep, string> = {
-  cip: "1 · CIP / identity",
+  cip: "1 · Login & Lace wallet",
   product: "2 · Product & amount",
   disclosures: "3 · Disclosures",
   confirm: "4 · Book on core",
-  track: "5 · Attest & tokenize",
+  track: "5 · Deliver certificate",
 };
 
 function truncateMiddle(value: string, head = 14, tail = 10): string {
@@ -52,13 +57,13 @@ function pipelineStages(
     },
     {
       id: "mint",
-      label: "CDT minted / vault funded",
+      label: "CDT minted · certificate under member wallet keys",
       done: hasTx || isActive || isMatured,
       current: false,
     },
     {
       id: "live",
-      label: isMatured ? "Matured" : "Active certificate",
+      label: isMatured ? "Matured — redeem in Lace" : "Active — hold / spend from wallet",
       done: isActive || isMatured,
       current: false,
     },
@@ -93,6 +98,58 @@ export function OpenCd({ member }: { member: MemberDto }) {
   const [opened, setOpened] = useState<DepositResponse | null>(null);
   const [trackedCd, setTrackedCd] = useState<CdDto | null>(null);
   const [trackError, setTrackError] = useState<string | null>(null);
+
+  /** Lace / CIP-30 destination wallet for certificate control. */
+  const [wallets, setWallets] = useState<DetectedWallet[]>([]);
+  const [walletId, setWalletId] = useState("lace");
+  const [laceAddress, setLaceAddress] = useState<string | null>(null);
+  const [laceNetworkId, setLaceNetworkId] = useState<number | null>(null);
+  const [walletError, setWalletError] = useState<string | null>(null);
+  const [walletBusy, setWalletBusy] = useState(false);
+  const [walletConfirmed, setWalletConfirmed] = useState(false);
+
+  const refreshWallets = useCallback(() => {
+    const list = detectCip30Wallets();
+    setWallets(list);
+    if (list.some((w) => w.id === "lace")) setWalletId("lace");
+    else if (list[0]) setWalletId(list[0].id);
+  }, []);
+
+  useEffect(() => {
+    refreshWallets();
+    const t = window.setTimeout(refreshWallets, 800);
+    return () => window.clearTimeout(t);
+  }, [refreshWallets]);
+
+  const connectDestinationWallet = async () => {
+    setWalletBusy(true);
+    setWalletError(null);
+    try {
+      const list = detectCip30Wallets();
+      if (list.length === 0) {
+        setWalletError(
+          "No CIP-30 wallet found. Install Lace (lace.io), enable the extension for this site, then retry.",
+        );
+        return;
+      }
+      const pick =
+        list.find((w) => w.id === walletId) ??
+        list.find((w) => w.id === "lace") ??
+        list[0]!;
+      const apiWallet: Cip30WalletApi = await pick.plugin.enable();
+      const change = await apiWallet.getChangeAddress();
+      const net = await apiWallet.getNetworkId();
+      setLaceAddress(change);
+      setLaceNetworkId(net);
+      setWalletId(pick.id);
+      // Soft match: core seed wallets may be bech32; CIP-30 often returns hex. Confirm explicitly.
+      setWalletConfirmed(false);
+    } catch (err) {
+      setWalletError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setWalletBusy(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -137,6 +194,8 @@ export function OpenCd({ member }: { member: MemberDto }) {
     () => (prep ? prep.checks.every((c) => checked[c.id]) : false),
     [prep, checked],
   );
+
+  const walletReady = Boolean(laceAddress) && walletConfirmed;
 
   const productReady =
     product !== null && amountCents !== null && amountProblem === null && prep?.hasCdFunding === true;
@@ -191,11 +250,12 @@ export function OpenCd({ member }: { member: MemberDto }) {
 
   return (
     <section className="openflow openflow--desk">
-      <h1 className="display">Tokenize a share certificate</h1>
+      <h1 className="display">Buy a CD — hold the certificate in Lace</h1>
       <p className="lede">
-        Bank desk flow for {member.memberName}: complete CIP checks, book the CD on the
-        core ledger, then watch oracle attestation and CDT minting. Dollars stay at the
-        credit union — the token is a portable record of the certificate.
+        Product position: the member logs into their <strong>credit union</strong> account, buys a
+        share certificate as <strong>CDT</strong>, and controls it from a browser wallet (
+        <strong>Lace</strong> preferred via CIP-30). Dollars stay on the CU core; the token is the
+        portable certificate.
       </p>
 
       <ol className="wizrail" aria-label="Tokenization steps">
@@ -213,7 +273,11 @@ export function OpenCd({ member }: { member: MemberDto }) {
 
       {step === "cip" && (
         <div className="wizpanel">
-          <h2 className="step">Member identity</h2>
+          <h2 className="step">Credit union member session</h2>
+          <p className="muted small">
+            Demo: member is selected in the portal. Production: authenticated online-banking / desk
+            SSO. This is the CU front door—not a public crypto exchange.
+          </p>
           <dl className="idcard">
             <div>
               <dt>Member</dt>
@@ -226,7 +290,7 @@ export function OpenCd({ member }: { member: MemberDto }) {
               </dd>
             </div>
             <div>
-              <dt>Wallet</dt>
+              <dt>Core wallet (system of record)</dt>
               <dd className="mono" title={prep.member.walletAddress}>
                 {truncateMiddle(prep.member.walletAddress, 16, 10)}
               </dd>
@@ -247,6 +311,80 @@ export function OpenCd({ member }: { member: MemberDto }) {
               </dd>
             </div>
           </dl>
+
+          <h2 className="step">Destination wallet (Lace)</h2>
+          <p className="muted small">
+            Connect the browser wallet that will <strong>control</strong> the certificate after
+            mint (redeem / free-spend / payment-check). Preferred:{" "}
+            <a href="https://www.lace.io/" target="_blank" rel="noreferrer">
+              Lace
+            </a>{" "}
+            via CIP-30.
+          </p>
+          {walletError && <ErrorNote message={walletError} />}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", alignItems: "center" }}>
+            <label>
+              Wallet
+              <select value={walletId} onChange={(e) => setWalletId(e.target.value)}>
+                {wallets.length === 0 && <option value="lace">Lace (not detected)</option>}
+                {wallets.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.label}
+                    {w.id === "lace" ? " ★" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="button secondary"
+              disabled={walletBusy}
+              onClick={() => refreshWallets()}
+            >
+              Refresh
+            </button>
+            <button
+              type="button"
+              className="button"
+              disabled={walletBusy}
+              onClick={() => void connectDestinationWallet()}
+            >
+              {walletBusy ? "Connecting…" : "Connect Lace / wallet"}
+            </button>
+          </div>
+          {laceAddress && (
+            <dl className="idcard" style={{ marginTop: "1rem" }}>
+              <div>
+                <dt>Connected wallet</dt>
+                <dd>{walletId}</dd>
+              </div>
+              <div>
+                <dt>Change address</dt>
+                <dd className="mono" title={laceAddress}>
+                  {truncateMiddle(laceAddress, 18, 12)}
+                </dd>
+              </div>
+              <div>
+                <dt>Network id</dt>
+                <dd>{laceNetworkId === 1 ? "mainnet (1)" : laceNetworkId === 0 ? "testnet (0)" : String(laceNetworkId)}</dd>
+              </div>
+            </dl>
+          )}
+          <label className="checklist__row" style={{ marginTop: "0.75rem" }}>
+            <input
+              type="checkbox"
+              checked={walletConfirmed}
+              disabled={!laceAddress}
+              onChange={(e) => setWalletConfirmed(e.currentTarget.checked)}
+            />
+            <span>
+              <strong>Deliver certificate control to this wallet</strong>
+              <span className="checklist__detail">
+                Member understands the CDT is controlled with these keys (Lace). Core still holds
+                the deposit; NCUSIF (if any) is on the share certificate, not the wallet app.
+              </span>
+            </span>
+          </label>
 
           <h2 className="step">CIP / compliance checklist</h2>
           <p className="muted small">
@@ -277,12 +415,17 @@ export function OpenCd({ member }: { member: MemberDto }) {
             <button
               className="button"
               type="button"
-              disabled={!allChecksDone || !prep.hasCdFunding}
+              disabled={!allChecksDone || !prep.hasCdFunding || !walletReady}
               onClick={() => go("product")}
             >
               Continue to product
             </button>
           </div>
+          {!walletReady && (
+            <p className="muted small" style={{ marginTop: "0.5rem" }}>
+              Connect Lace (or another CIP-30 wallet) and confirm delivery to continue.
+            </p>
+          )}
         </div>
       )}
 
