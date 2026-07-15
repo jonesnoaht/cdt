@@ -221,6 +221,247 @@ describe("GET /api/members/:id/cds", () => {
   });
 });
 
+describe("GET /api/members/:id/tokenize-prep", () => {
+  it("returns member identity, accounts, CIP checklist, and amount presets", async () => {
+    const { status, body } = await getJson<{
+      member: MemberDto;
+      hasCdFunding: boolean;
+      cdFundingAccountId: number | null;
+      insuranceLimitCents: number;
+      checks: Array<{ id: string; label: string }>;
+      disclosures: Array<{ id: string; text: string }>;
+      amountPresetsCents: number[];
+      accounts: AccountDto[];
+    }>(`/api/members/${fx.ada.memberId}/tokenize-prep`);
+    expect(status).toBe(200);
+    expect(body.member.memberName).toBe("Ada Lovelace");
+    expect(body.hasCdFunding).toBe(true);
+    expect(body.cdFundingAccountId).toBe(fx.ada.cdFundingId);
+    expect(body.insuranceLimitCents).toBe(250_000_00);
+    expect(body.checks.map((c) => c.id)).toEqual([
+      "membership",
+      "cip",
+      "ofac",
+      "disclosures",
+      "credential",
+    ]);
+    expect(body.disclosures.length).toBeGreaterThanOrEqual(3);
+    expect(body.amountPresetsCents).toContain(250_000_00);
+    expect(body.accounts).toHaveLength(2);
+  });
+
+  it("404s for an unknown member", async () => {
+    const { status } = await getJson(`/api/members/99999/tokenize-prep`);
+    expect(status).toBe(404);
+  });
+});
+
+describe("correspondent presentment", () => {
+  it("looks up a foreign attested claim by deposit id", async () => {
+    const { status, body } = await getJson<{
+      holderName: string;
+      issuerName: string;
+      redeemable: boolean;
+      cashOutMode: string;
+      cashOutCents: number | null;
+      claim: { status: string; transactionId: number };
+    }>(`/api/claims/${fx.cds.activeTxId}`);
+    expect(status).toBe(200);
+    expect(body.issuerName).toContain("CampusUSA");
+    expect(body.holderName).toBe("Ada Lovelace");
+    expect(body.redeemable).toBe(true);
+    expect(body.cashOutMode).toBe("early"); // active CD in fixture clock
+    expect(body.cashOutCents).toBeGreaterThan(0);
+    expect(body.claim.transactionId).toBe(fx.cds.activeTxId);
+  });
+
+  it("quotes mature cash-out for a matured certificate", async () => {
+    const { body } = await getJson<{ cashOutMode: string; cashOutCents: number }>(
+      `/api/claims/${fx.cds.maturedTxId}`,
+    );
+    expect(body.cashOutMode).toBe("mature");
+    expect(body.cashOutCents).toBeGreaterThan(0);
+  });
+
+  it("marks pending deposits as not redeemable", async () => {
+    const { body } = await getJson<{ redeemable: boolean; cashOutMode: string }>(
+      `/api/claims/${fx.cds.pendingTxId}`,
+    );
+    expect(body.redeemable).toBe(false);
+    expect(body.cashOutMode).toBe("not_ready");
+  });
+
+  it("files a presentment after CIP checks and rejects double cash-out", async () => {
+    // Fresh app instance so presentment store is empty
+    const localApp = createApp({ pool, now: () => NOW_MS });
+    const post = async (path: string, body: unknown) => {
+      const res = await localApp.request(path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return { status: res.status, body: await res.json() };
+    };
+    const get = async (path: string) => {
+      const res = await localApp.request(path);
+      return { status: res.status, body: await res.json() };
+    };
+
+    const bad = await post("/api/presentments", {
+      claimRef: String(fx.cds.activeTxId),
+      walkInName: "Ada Lovelace",
+      checks: { cip: true, ofac: false, ownershipProof: true },
+    });
+    expect(bad.status).toBe(422);
+
+    const ok = await post("/api/presentments", {
+      claimRef: String(fx.cds.activeTxId),
+      walkInName: "Ada Lovelace",
+      presentingCuName: "Gulfside Credit Union",
+      checks: { cip: true, ofac: true, ownershipProof: true },
+    });
+    expect(ok.status).toBe(201);
+    expect(ok.body).toMatchObject({
+      walkInName: "Ada Lovelace",
+      status: "cash_advanced_pending_settlement",
+      cashOutMode: "early",
+    });
+    expect((ok.body as { cashOutCents: number }).cashOutCents).toBeGreaterThan(0);
+
+    const dup = await post("/api/presentments", {
+      claimRef: String(fx.cds.activeTxId),
+      walkInName: "Ada Lovelace",
+      checks: { cip: true, ofac: true, ownershipProof: true },
+    });
+    expect(dup.status).toBe(409);
+
+    const list = await get("/api/presentments");
+    expect(list.status).toBe(200);
+    expect(list.body).toHaveLength(1);
+
+    const wrongName = await post("/api/presentments", {
+      claimRef: String(fx.cds.maturedTxId),
+      walkInName: "Impostor",
+      checks: { cip: true, ofac: true, ownershipProof: true },
+    });
+    expect(wrongName.status).toBe(422);
+  });
+
+  it("404s unknown claims", async () => {
+    const { status } = await getJson("/api/claims/does-not-exist");
+    expect(status).toBe(404);
+  });
+});
+
+describe("payment terminal oracle check (freely spendable)", () => {
+  it("publishes the payment_check contract surface", async () => {
+    const { status, body } = await getJson<{ name: string; paradigm: string }>(
+      "/api/payment/contract",
+    );
+    expect(status).toBe(200);
+    expect(body.name).toBe("cdt.payment_check.v1");
+    expect(body.paradigm).toBe("freely_spendable");
+  });
+
+  it("issues a challenge, verifies an attested claim, and validates the signature", async () => {
+    const oracle = new (await import("../src/server/payment-oracle.js")).PaymentOracle();
+    const localApp = createApp({ pool, now: () => NOW_MS, paymentOracle: oracle });
+
+    const chRes = await localApp.request("/api/payment/challenge", { method: "POST" });
+    expect(chRes.status).toBe(200);
+    const ch = (await chRes.json()) as { challenge: string };
+
+    const bad = await localApp.request("/api/payment/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        claimRef: String(fx.cds.pendingTxId),
+        merchantId: "m1",
+        challenge: ch.challenge,
+      }),
+    });
+    // challenge was consumed even on failure path if verify ran... actually pending returns after challenge consume
+    // First challenge is consumed by pending check - need new challenge for success path
+    const pendingBody = (await bad.json()) as { ok: boolean; reason: string };
+    expect(pendingBody.ok).toBe(false);
+    expect(pendingBody.reason).toMatch(/not oracle-attested/i);
+
+    const ch2Res = await localApp.request("/api/payment/challenge", { method: "POST" });
+    const ch2 = (await ch2Res.json()) as { challenge: string };
+    const okRes = await localApp.request("/api/payment/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        claimRef: String(fx.cds.activeTxId),
+        merchantId: "coffee-shop-42",
+        challenge: ch2.challenge,
+        amountCents: 100_00,
+      }),
+    });
+    expect(okRes.status).toBe(200);
+    const okBody = (await okRes.json()) as {
+      ok: true;
+      signedCheck: { payload: { freelySpendable: boolean; depositId: string }; signature: string };
+    };
+    expect(okBody.ok).toBe(true);
+    expect(okBody.signedCheck.payload.freelySpendable).toBe(true);
+    expect(okBody.signedCheck.payload.depositId).toBe(String(fx.cds.activeTxId));
+
+    const sigRes = await localApp.request("/api/payment/verify-signature", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(okBody.signedCheck),
+    });
+    expect(sigRes.status).toBe(200);
+    expect(await sigRes.json()).toEqual({ valid: true });
+
+    // Replay of the same challenge must fail
+    const replay = await localApp.request("/api/payment/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        claimRef: String(fx.cds.activeTxId),
+        merchantId: "coffee-shop-42",
+        challenge: ch2.challenge,
+      }),
+    });
+    const replayBody = (await replay.json()) as { ok: boolean };
+    expect(replayBody.ok).toBe(false);
+  });
+
+  it("rejects payer wallet mismatch and over-principal invoices", async () => {
+    const localApp = createApp({ pool, now: () => NOW_MS });
+    const challenge = async () => {
+      const r = await localApp.request("/api/payment/challenge", { method: "POST" });
+      return ((await r.json()) as { challenge: string }).challenge;
+    };
+
+    const mismatch = await localApp.request("/api/payment/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        claimRef: String(fx.cds.activeTxId),
+        merchantId: "m",
+        challenge: await challenge(),
+        payerWallet: "addr_not_the_owner",
+      }),
+    });
+    expect(((await mismatch.json()) as { ok: boolean }).ok).toBe(false);
+
+    const over = await localApp.request("/api/payment/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        claimRef: String(fx.cds.activeTxId),
+        merchantId: "m",
+        challenge: await challenge(),
+        amountCents: 999_999_00,
+      }),
+    });
+    expect(((await over.json()) as { reason: string }).reason).toMatch(/exceeds certificate principal/i);
+  });
+});
+
 describe("POST /api/members/:id/deposits", () => {
   it("opens a CD (writes a pending CD-funding deposit)", async () => {
     const { status, body } = await postJson<{ transactionId: number; status: string }>(

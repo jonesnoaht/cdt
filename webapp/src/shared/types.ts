@@ -103,6 +103,39 @@ export interface DepositResponse {
   status: "pending";
 }
 
+/**
+ * Bank-desk prep payload for the tokenization wizard: who the member is,
+ * whether they have a CD funding account, and the compliance checklist the
+ * teller must confirm before funding (demo stand-in for CIP / OFAC files).
+ */
+export interface TokenizePrepDto {
+  member: MemberDto;
+  accounts: AccountDto[];
+  hasCdFunding: boolean;
+  cdFundingAccountId: number | null;
+  /** NCUSIF standard maximum share insurance amount, in cents. */
+  insuranceLimitCents: number;
+  checks: Array<{
+    id: string;
+    label: string;
+    detail: string;
+  }>;
+  disclosures: Array<{
+    id: string;
+    text: string;
+  }>;
+  /** Suggested deposit amounts for the desk UI. */
+  amountPresetsCents: number[];
+}
+
+/** Live pipeline stage for a single CD after the core deposit is booked. */
+export type TokenizeStage =
+  | "booked"
+  | "awaiting_attestation"
+  | "attested"
+  | "tokenized"
+  | "matured";
+
 export interface ChainLookupDto {
   available: boolean;
   reason?: string;
@@ -116,3 +149,128 @@ export interface ChainLookupDto {
 export interface ApiError {
   error: string;
 }
+
+/** Foreign CDT claim as seen by a non-issuing (correspondent) credit union. */
+export interface ClaimLookupDto {
+  claim: CdDto;
+  issuerName: string;
+  holderName: string;
+  holderDid: string;
+  holderWallet: string;
+  redeemable: boolean;
+  cashOutMode: "mature" | "early" | "not_ready";
+  cashOutCents: number | null;
+  notes: string[];
+}
+
+export interface PresentmentChecks {
+  cip: boolean;
+  ofac: boolean;
+  ownershipProof: boolean;
+}
+
+export interface PresentmentRequest {
+  /** Deposit id or bank transaction id string. */
+  claimRef: string;
+  walkInName: string;
+  presentingCuName?: string;
+  checks: PresentmentChecks;
+}
+
+export type PresentmentStatus =
+  | "cash_advanced_pending_settlement"
+  | "settled"
+  | "rejected";
+
+export interface PresentmentDto {
+  id: number;
+  createdAt: string;
+  status: PresentmentStatus;
+  presentingCuName: string;
+  issuerName: string;
+  walkInName: string;
+  transactionId: number;
+  depositId: string | null;
+  principalCents: number;
+  cashOutCents: number;
+  cashOutMode: "mature" | "early";
+  productName: string;
+  rateBps: number;
+  holderDid: string;
+  holderWallet: string;
+  settlement: string;
+  nextSteps: string[];
+}
+
+/**
+ * Opt-in payment-terminal verification (freely spendable CDT paradigm).
+ * Terminals call the oracle for a short-lived signed check; transfers stay
+ * unconstrained on-chain.
+ */
+export interface PaymentChallengeDto {
+  challenge: string;
+  expiresAtMs: number;
+}
+
+export interface PaymentOraclePubKeyDto {
+  algorithm: "Ed25519";
+  publicKeySpkiBase64: string;
+  purpose: string;
+}
+
+export interface PaymentVerifyRequest {
+  /** Deposit id or bank transaction id. */
+  claimRef: string;
+  merchantId: string;
+  /** Fresh challenge from POST /api/payment/challenge. */
+  challenge: string;
+  /** Optional invoice amount (cents); must not exceed principal if set. */
+  amountCents?: number;
+  /** Optional payer wallet; must match attested owner when set. */
+  payerWallet?: string;
+}
+
+export interface PaymentCheckPayload {
+  schema: "cdt.payment_check.v1";
+  /** Explicit: this check is advisory; assets remain freely transferable. */
+  freelySpendable: true;
+  depositId: string;
+  transactionId: number;
+  status: CdStatus;
+  principalCents: number;
+  rateBps: number;
+  ownerWallet: string;
+  ownerDid: string;
+  holderName: string;
+  issuerName: string;
+  merchantId: string;
+  amountCents: number | null;
+  challenge: string;
+  checkedAtMs: number;
+  expiresAtMs: number;
+  mintTxHash: string | null;
+}
+
+export interface SignedPaymentCheck {
+  payload: PaymentCheckPayload;
+  signature: string;
+  algorithm: "Ed25519";
+  oraclePublicKeySpkiBase64: string;
+}
+
+export type PaymentVerifyResponse =
+  | {
+      ok: true;
+      signedCheck: SignedPaymentCheck;
+      advice: string[];
+    }
+  | {
+      ok: false;
+      reason: string;
+      claimSummary?: {
+        transactionId: number;
+        depositId: string | null;
+        status: CdStatus;
+        holderName: string;
+      };
+    };

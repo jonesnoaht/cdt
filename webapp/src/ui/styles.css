@@ -701,7 +701,11 @@ h3 {
 /* ---- open flow ----------------------------------------------------------- */
 
 .openflow {
-  max-width: 42rem;
+  max-width: 46rem;
+}
+
+.openflow--desk {
+  max-width: 48rem;
 }
 
 .step {
@@ -709,6 +713,332 @@ h3 {
   border-bottom: 1px solid var(--line);
   padding-bottom: 0.35rem;
   margin: 2rem 0 1rem;
+}
+
+.wizrail {
+  list-style: none;
+  margin: 0 0 1.5rem;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.wizrail__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  padding: 0.55rem 0.45rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  min-height: 3.6rem;
+}
+
+.wizrail__dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.wizrail__label {
+  font-size: 0.72rem;
+  line-height: 1.25;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.wizrail__item.is-current {
+  border-color: var(--pine);
+  box-shadow: 0 0 0 1px var(--pine);
+}
+
+.wizrail__item.is-current .wizrail__dot {
+  background: var(--pine);
+}
+
+.wizrail__item.is-current .wizrail__label {
+  color: var(--pine-deep);
+}
+
+.wizrail__item.is-done {
+  background: var(--pine-soft);
+  border-color: #b7d0c3;
+}
+
+.wizrail__item.is-done .wizrail__dot {
+  background: var(--pine);
+}
+
+.wizpanel {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem 1.35rem;
+}
+
+.wizpanel .step:first-child {
+  margin-top: 0.25rem;
+}
+
+.wizactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 1.4rem;
+  align-items: center;
+}
+
+.idcard {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem 1.25rem;
+  margin: 0 0 0.5rem;
+}
+
+.idcard > div {
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+
+.idcard dt {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 0.2rem;
+}
+
+.idcard dd {
+  margin: 0;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.checklist {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.checklist__row {
+  display: grid;
+  grid-template-columns: 1.25rem 1fr;
+  gap: 0.7rem;
+  align-items: start;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  cursor: pointer;
+}
+
+.checklist__row input {
+  margin-top: 0.2rem;
+  accent-color: var(--pine);
+}
+
+.checklist__row strong {
+  display: block;
+}
+
+.checklist__detail {
+  display: block;
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin-top: 0.2rem;
+}
+
+.checklist__row--solo {
+  margin-top: 1rem;
+}
+
+.presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0 0 0.75rem;
+}
+
+.chip {
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  font: inherit;
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.chip.is-selected {
+  border-color: var(--pine);
+  background: var(--pine-soft);
+  color: var(--pine-deep);
+  font-weight: 600;
+}
+
+.amount--wide {
+  max-width: 22rem;
+}
+
+.disclosures {
+  margin: 0.75rem 0 0;
+  padding-left: 1.15rem;
+  color: var(--muted);
+}
+
+.disclosures li {
+  margin-bottom: 0.55rem;
+}
+
+.pipeline {
+  list-style: none;
+  margin: 1rem 0 1.25rem;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.pipeline li {
+  display: grid;
+  grid-template-columns: 1.1rem 1fr;
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.55rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.pipeline__mark {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.pipeline .is-done {
+  color: var(--pine-deep);
+  background: var(--pine-soft);
+  border-color: #b7d0c3;
+}
+
+.pipeline .is-done .pipeline__mark {
+  background: var(--pine);
+}
+
+.pipeline .is-current {
+  color: var(--ink);
+  border-color: var(--brass);
+  background: var(--brass-soft);
+}
+
+.pipeline .is-current .pipeline__mark {
+  background: var(--brass);
+}
+
+.trackcard {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+  background: var(--paper);
+  margin-bottom: 0.5rem;
+}
+
+.trackcard__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.trackcard__head h3 {
+  margin: 0;
+  font-family: var(--display);
+}
+
+.desk-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: baseline;
+  padding: 0.75rem 1rem;
+  margin: 0 0 1rem;
+  border-radius: var(--radius);
+  border: 1px solid #c9b27a;
+  background: var(--brass-soft);
+}
+
+.desk-banner__role {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--brass);
+}
+
+.wizrail--4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.field {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.75rem 0 1rem;
+  max-width: 28rem;
+}
+
+.field span {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.field input {
+  font: inherit;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--paper);
+}
+
+.field input:focus {
+  outline: none;
+  border-color: var(--pine);
+  box-shadow: 0 0 0 1px var(--pine);
+}
+
+.fieldError {
+  color: var(--danger);
+  font-size: 0.9rem;
+}
+
+.present-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.present-list li {
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  font-size: 0.9rem;
 }
 
 .products {
@@ -879,6 +1209,14 @@ h3 {
 
   .display {
     font-size: 1.55rem;
+  }
+
+  .wizrail {
+    grid-template-columns: 1fr;
+  }
+
+  .idcard {
+    grid-template-columns: 1fr;
   }
 }
 

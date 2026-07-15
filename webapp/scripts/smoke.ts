@@ -114,6 +114,34 @@ try {
   assert(chain.available === false, "chain: expected available:false without CHAIN_PROVIDER");
   pass(`GET /api/cds/${fx.cds.activeTxId}/chain (available: false — offline mode)`);
 
+  const prep = curl("GET", `/api/members/${fx.ada.memberId}/tokenize-prep`) as Record<
+    string,
+    unknown
+  >;
+  assert(prep.hasCdFunding === true, "tokenize-prep: expected CD funding account");
+  assert(Array.isArray(prep.checks) && (prep.checks as unknown[]).length >= 5, "tokenize-prep: checks");
+  assert(
+    Array.isArray(prep.amountPresetsCents) &&
+      (prep.amountPresetsCents as number[]).includes(250_000_00),
+    "tokenize-prep: $250k preset",
+  );
+  pass(`GET /api/members/${fx.ada.memberId}/tokenize-prep (bank desk checklist ready)`);
+
+  const claim = curl("GET", `/api/claims/${fx.cds.activeTxId}`) as Record<string, unknown>;
+  assert(claim.redeemable === true, "claims: active CD should be redeemable");
+  assert(claim.holderName === "Ada Lovelace", "claims: holder name");
+  pass(`GET /api/claims/${fx.cds.activeTxId} (foreign claim lookup)`);
+
+  const presentment = curl("POST", "/api/presentments", {
+    claimRef: String(fx.cds.maturedTxId),
+    walkInName: "Ada Lovelace",
+    presentingCuName: "Gulfside Credit Union",
+    checks: { cip: true, ofac: true, ownershipProof: true },
+  }) as Record<string, unknown>;
+  assert(typeof presentment.id === "number", "presentment: id");
+  assert(presentment.status === "cash_advanced_pending_settlement", "presentment: status");
+  pass(`POST /api/presentments (#${presentment.id} cash advanced, pending issuer settlement)`);
+
   const deposit = curl("POST", `/api/members/${fx.grace.memberId}/deposits`, {
     productId: fx.products.twelveMonth,
     amountCents: 200_000,

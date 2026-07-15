@@ -10,10 +10,23 @@ import type {
   ChainLookupDto,
   DepositResponse,
   MemberDto,
+  PresentmentDto,
+  PresentmentRequest,
   ProductDto,
+  TokenizePrepDto,
+  ClaimLookupDto,
+  PaymentVerifyRequest,
+  SignedPaymentCheck,
 } from "../shared/types.js";
 import { chainLookup } from "./chain.js";
 import { CDS_SQL, productDtoFromRow, toCdDto, type CdRow } from "./cds.js";
+import {
+  PresentmentStore,
+  defaultPresentingCu,
+  defaultIssuerName,
+  lookupClaim,
+} from "./presentments.js";
+import { PaymentOracle } from "./payment-oracle.js";
 
 /**
  * Largest deposit (in cents) whose lovelace representation still fits in a
@@ -22,6 +35,58 @@ import { CDS_SQL, productDtoFromRow, toCdDto, type CdRow } from "./cds.js";
  */
 const MAX_DEPOSIT_CENTS = Math.floor(Number.MAX_SAFE_INTEGER / 10_000);
 
+/** Standard NCUSIF SMSIA — used for desk disclosures, not a hard cap. */
+const INSURANCE_LIMIT_CENTS = 250_000_00;
+
+const TOKENIZE_CHECKS: TokenizePrepDto["checks"] = [
+  {
+    id: "membership",
+    label: "Membership eligibility confirmed",
+    detail: "Member is within the credit union field of membership.",
+  },
+  {
+    id: "cip",
+    label: "CIP / KYC complete",
+    detail:
+      "Name, DOB, address, and TIN collected and verified. CIP file lives in the core system — not on-chain.",
+  },
+  {
+    id: "ofac",
+    label: "OFAC / sanctions screening cleared",
+    detail: "Screened at membership and again for this funding event.",
+  },
+  {
+    id: "disclosures",
+    label: "Truth in Savings disclosures delivered",
+    detail: "APY, term, and early-withdrawal penalty match the product terms that will appear in the token datum.",
+  },
+  {
+    id: "credential",
+    label: "AccountHolderCredential ready",
+    detail:
+      "NCUA → InsuredInstitutionCredential → credit union → AccountHolderCredential → member DID. Oracle will verify this chain before attesting.",
+  },
+];
+
+const TOKENIZE_DISCLOSURES: TokenizePrepDto["disclosures"] = [
+  {
+    id: "deposit_insured",
+    text: "The share certificate (deposit) is held at the credit union and is federally insured by the NCUA up to applicable limits. The CDT token is a record of that certificate — the token itself is not insured.",
+  },
+  {
+    id: "funds_stay",
+    text: "Member dollars never leave the credit union. Minting a CDT does not move money on-chain; the vault in this demo is pre-funded settlement liquidity, not the member's insured balance leaving the core.",
+  },
+  {
+    id: "non_transfer",
+    text: "CDT units are freely transferable native assets. Payment terminals should optionally call the payment-oracle verification contract (challenge → verify → check signature) before accepting a CDT as consideration; that check does not freeze or lock the token.",
+  },
+  {
+    id: "core_authoritative",
+    text: "The core banking ledger remains the system of record for the insured claim. If a token is lost, the credit union can re-verify the member and reissue after invalidating the stranded token.",
+  },
+];
+
 export interface AppOptions {
   pool: pg.Pool;
   /** Clock override for tests (epoch ms). */
@@ -29,6 +94,10 @@ export interface AppOptions {
   chainProvider?: string | undefined;
   koiosBaseUrl?: string;
   fetchImpl?: typeof fetch;
+  /** Optional shared presentment store (tests inject a fresh one). */
+  presentmentStore?: PresentmentStore;
+  /** Optional payment oracle (tests inject for stable keys / isolation). */
+  paymentOracle?: PaymentOracle;
 }
 
 interface MemberIdentity {
@@ -61,6 +130,8 @@ export function createApp(options: AppOptions): Hono {
   const { pool } = options;
   const now = options.now ?? Date.now;
   const koiosBaseUrl = options.koiosBaseUrl ?? "https://preview.koios.rest/api/v1";
+  const presentments = options.presentmentStore ?? new PresentmentStore();
+  const paymentOracle = options.paymentOracle ?? new PaymentOracle();
 
   const app = new Hono();
 
@@ -137,6 +208,53 @@ export function createApp(options: AppOptions): Hono {
     return c.json(rows.map((row) => toCdDto(row as CdRow, now(), includeCurve)));
   });
 
+  // --- Bank desk: tokenization prep (CIP checklist + accounts) ----------------
+  app.get("/api/members/:id/tokenize-prep", async (c) => {
+    const id = parseIdParam(c.req.param("id"));
+    if (id === null) return c.json({ error: "Invalid member id." }, 400);
+    const member = await resolveMember(pool, id);
+    if (!member) return c.json({ error: "Member not found." }, 404);
+
+    const { rows } = await pool.query(
+      `SELECT a.id, a.member_name, a.wallet_address, a.did, a.kind, a.created_at,
+              COALESCE(SUM(CASE WHEN t.kind = 'deposit' THEN t.amount_cents
+                                WHEN t.kind = 'withdrawal' THEN -t.amount_cents
+                                ELSE 0 END), 0) AS balance_cents
+         FROM accounts a
+         LEFT JOIN transactions t ON t.account_id = a.id
+        WHERE a.wallet_address = $1 AND a.did = $2
+        GROUP BY a.id
+        ORDER BY a.id`,
+      [member.walletAddress, member.did],
+    );
+    const accounts: AccountDto[] = rows.map((r) => ({
+      id: r.id,
+      memberName: r.member_name,
+      walletAddress: r.wallet_address,
+      did: r.did,
+      kind: r.kind,
+      balanceCents: Number(r.balance_cents),
+      createdAt: new Date(r.created_at).toISOString(),
+    }));
+    const funding = accounts.find((a) => a.kind === "cd_funding") ?? null;
+    const prep: TokenizePrepDto = {
+      member: {
+        id,
+        memberName: member.memberName,
+        walletAddress: member.walletAddress,
+        did: member.did,
+      },
+      accounts,
+      hasCdFunding: funding !== null,
+      cdFundingAccountId: funding?.id ?? null,
+      insuranceLimitCents: INSURANCE_LIMIT_CENTS,
+      checks: TOKENIZE_CHECKS,
+      disclosures: TOKENIZE_DISCLOSURES,
+      amountPresetsCents: [500_00, 1_000_00, 10_000_00, 100_000_00, 250_000_00],
+    };
+    return c.json(prep);
+  });
+
   // --- Open a CD --------------------------------------------------------------
   app.post("/api/members/:id/deposits", async (c) => {
     const id = parseIdParam(c.req.param("id"));
@@ -207,6 +325,118 @@ export function createApp(options: AppOptions): Hono {
       status: "pending",
     };
     return c.json(response, 201);
+  });
+
+  // --- Correspondent presentment (foreign CDT cash-out desk) -----------------
+  app.get("/api/correspondent/meta", (c) =>
+    c.json({
+      presentingCuName: defaultPresentingCu,
+      issuerName: defaultIssuerName,
+      role: "correspondent_presenting_cu",
+      description:
+        "Desk for a non-issuing credit union that verifies a foreign CDT and may advance cash against settlement from the issuer.",
+    }),
+  );
+
+  app.get("/api/claims/:ref", async (c) => {
+    const raw = c.req.param("ref");
+    if (!raw || !raw.trim()) return c.json({ error: "Claim reference is required." }, 400);
+    const claim = await lookupClaim(pool, raw, now());
+    if (!claim) return c.json({ error: "No certificate found for that deposit / transaction id." }, 404);
+    return c.json(claim satisfies ClaimLookupDto);
+  });
+
+  app.get("/api/presentments", (c) => c.json(presentments.list()));
+
+  app.get("/api/presentments/:id", (c) => {
+    const id = parseIdParam(c.req.param("id"));
+    if (id === null) return c.json({ error: "Invalid presentment id." }, 400);
+    const row = presentments.get(id);
+    if (!row) return c.json({ error: "Presentment not found." }, 404);
+    return c.json(row);
+  });
+
+  app.post("/api/presentments", async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Request body must be JSON." }, 400);
+    }
+    const req = (body ?? {}) as PresentmentRequest;
+    if (typeof req.claimRef !== "string" || !req.claimRef.trim()) {
+      return c.json({ error: "claimRef is required." }, 400);
+    }
+    const claim = await lookupClaim(pool, req.claimRef, now());
+    if (!claim) return c.json({ error: "No certificate found for that claim reference." }, 404);
+
+    const result = presentments.create({ claim, body: req, nowMs: now() });
+    if ("error" in result) {
+      return c.json({ error: result.error }, result.status as 400 | 409 | 422);
+    }
+    return c.json(result satisfies PresentmentDto, 201);
+  });
+
+  // --- Payment terminal: opt-in oracle attestation check (free-spend CDT) ----
+  app.get("/api/payment/oracle-pubkey", (c) => c.json(paymentOracle.pubkey()));
+
+  app.get("/api/payment/contract", (c) =>
+    c.json({
+      name: "cdt.payment_check.v1",
+      paradigm: "freely_spendable",
+      description:
+        "Payment terminals optionally verify issuer deposit attestation via an oracle before accepting a CDT. Transfers remain unconstrained on-chain.",
+      flow: [
+        "GET /api/payment/oracle-pubkey — pin the oracle key",
+        "POST /api/payment/challenge — one-time nonce",
+        "POST /api/payment/verify — { claimRef, merchantId, challenge, amountCents?, payerWallet? }",
+        "Locally verify Ed25519 signature over canonical JSON of signedCheck.payload",
+        "Accept payment only if ok and signature valid and not expired",
+      ],
+      nonGoals: [
+        "Does not lock, freeze, or allowlist CDT transfers",
+        "Does not replace core-banking redemption",
+        "Does not move insured deposit funds",
+      ],
+    }),
+  );
+
+  app.post("/api/payment/challenge", (c) => c.json(paymentOracle.issueChallenge(now())));
+
+  app.post("/api/payment/verify", async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Request body must be JSON." }, 400);
+    }
+    try {
+      const result = await paymentOracle.verify(pool, body as PaymentVerifyRequest, now());
+      return c.json(result);
+    } catch (err) {
+      console.error("payment verify failed:", err);
+      return c.json(
+        {
+          ok: false,
+          reason: `Oracle could not reach the issuer core ledger: ${String(err)}`,
+        },
+        503,
+      );
+    }
+  });
+
+  app.post("/api/payment/verify-signature", async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Request body must be JSON." }, 400);
+    }
+    const signed = body as SignedPaymentCheck;
+    if (!signed || typeof signed !== "object" || !signed.payload || !signed.signature) {
+      return c.json({ error: "Body must be a SignedPaymentCheck." }, 400);
+    }
+    return c.json(paymentOracle.verifySignedCheck(signed, now()));
   });
 
   // --- Optional on-chain lookup ----------------------------------------------
