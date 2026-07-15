@@ -1,14 +1,14 @@
 /**
  * Settlement payment rail adapter.
  *
- * SettlementPayment today is an audit record on the presentment row.
- * This module defines a pluggable rail so pilot ACH can be swapped in
- * without changing the desk API.
+ * SettlementPayment is an audit record on the presentment row plus an optional
+ * push to an external ACH/FedNow adapter.
  *
- * Modes:
+ * Modes (SETTLEMENT_RAIL):
  *   mock  — always succeeds with a synthetic trace id (lab default)
  *   log   — same as mock but logs to console
- *   none  — refuse to pay (record-only / production until rail wired)
+ *   http  — POST to SETTLEMENT_ACH_URL (real bank adapter / middleware)
+ *   none  — refuse to pay (record-only until rail wired)
  */
 export interface SettlementRailRequest {
   presentmentId: number;
@@ -90,11 +90,105 @@ export class DisabledRail implements SettlementRail {
   }
 }
 
+/**
+ * HTTP ACH/FedNow adapter (middleware / core gateway).
+ *
+ * POST SETTLEMENT_ACH_URL
+ *   Authorization: Bearer SETTLEMENT_ACH_TOKEN (optional)
+ *   Body: SettlementRailRequest JSON
+ *   2xx Body: { "traceId": "…", "paidAt"?: ISO, "rail"?: string }
+ *   4xx/5xx or { "ok": false, "reason": "…" } → RAIL_REJECTED / RAIL_ERROR
+ */
+export class HttpAchRail implements SettlementRail {
+  readonly name = "ACH-http";
+  constructor(
+    private readonly url: string,
+    private readonly token?: string,
+    private readonly fetchImpl: typeof fetch = fetch,
+  ) {}
+
+  async pay(
+    req: SettlementRailRequest,
+    nowMs: number,
+  ): Promise<SettlementRailResult | SettlementRailError> {
+    try {
+      const headers: Record<string, string> = {
+        "content-type": "application/json",
+        accept: "application/json",
+      };
+      if (this.token) headers.authorization = `Bearer ${this.token}`;
+      const res = await this.fetchImpl(this.url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          ...req,
+          requestedAt: new Date(nowMs).toISOString(),
+        }),
+      });
+      const text = await res.text();
+      let body: {
+        ok?: boolean;
+        traceId?: string;
+        paidAt?: string;
+        rail?: string;
+        reason?: string;
+      } = {};
+      try {
+        body = text ? (JSON.parse(text) as typeof body) : {};
+      } catch {
+        if (!res.ok) {
+          return {
+            ok: false,
+            reason: `ACH HTTP ${res.status}: ${text.slice(0, 200)}`,
+            reasonCode: "RAIL_ERROR",
+          };
+        }
+      }
+      if (!res.ok || body.ok === false) {
+        return {
+          ok: false,
+          reason: body.reason ?? `ACH HTTP ${res.status}: ${text.slice(0, 200)}`,
+          reasonCode: res.status >= 500 ? "RAIL_ERROR" : "RAIL_REJECTED",
+        };
+      }
+      if (!body.traceId || typeof body.traceId !== "string") {
+        return {
+          ok: false,
+          reason: "ACH adapter response missing traceId.",
+          reasonCode: "RAIL_ERROR",
+        };
+      }
+      return {
+        ok: true,
+        rail: body.rail ?? this.name,
+        traceId: body.traceId,
+        paidAt: body.paidAt ?? new Date(nowMs).toISOString(),
+        raw: body,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        reason: `ACH adapter network error: ${String(err)}`,
+        reasonCode: "RAIL_ERROR",
+      };
+    }
+  }
+}
+
 export function settlementRailFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): SettlementRail {
   const mode = (env.SETTLEMENT_RAIL || "mock").toLowerCase();
   if (mode === "none" || mode === "disabled") return new DisabledRail();
   if (mode === "log") return new LogAchRail();
+  if (mode === "http" || mode === "ach") {
+    const url = env.SETTLEMENT_ACH_URL || "";
+    if (!url) {
+      throw new Error(
+        "SETTLEMENT_RAIL=http requires SETTLEMENT_ACH_URL (bank ACH/FedNow adapter endpoint)",
+      );
+    }
+    return new HttpAchRail(url, env.SETTLEMENT_ACH_TOKEN);
+  }
   return new MockAchRail();
 }

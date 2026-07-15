@@ -120,4 +120,28 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     }),
+  createSignRequest: (body: {
+    purpose: string;
+    cborHex: string;
+    depositId?: string;
+    presentmentId?: number;
+    description?: string;
+    publicBaseUrl: string;
+    deepLinkTemplate?: string;
+  }) =>
+    request<unknown>("/api/sign-requests", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  getSignRequest: (id: string) => request<unknown>(`/api/sign-requests/${encodeURIComponent(id)}`),
+  completeSignRequest: (
+    id: string,
+    body: { signedCborHex?: string; witnessCborHex?: string },
+  ) =>
+    request<unknown>(`/api/sign-requests/${encodeURIComponent(id)}/complete`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
 };
