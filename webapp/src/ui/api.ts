@@ -128,6 +128,7 @@ export const api = {
     description?: string;
     publicBaseUrl: string;
     deepLinkTemplate?: string;
+    walletBrand?: string;
   }) =>
     request<unknown>("/api/sign-requests", {
       method: "POST",

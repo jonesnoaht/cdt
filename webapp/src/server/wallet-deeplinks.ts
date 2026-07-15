@@ -55,9 +55,10 @@ export function buildWalletDeepLinks(claimUrl: string): DeepLinkOption[] {
     },
     {
       brand: "lace",
-      label: "Lace",
+      label: "Lace (CIP-30 — preferred)",
       url: claimUrl,
-      notes: "Use mobile browser + Lace if installed; no stable public deep-link API yet.",
+      notes:
+        "Open claim page in Chrome/Brave (extension) or Lace mobile browser. Use Connect Lace & sign (CIP-30 signTx).",
     },
     {
       brand: "nami",
@@ -100,11 +101,11 @@ export function deepLinkTemplateForBrand(brand: WalletBrand): string | undefined
 
 export function listWalletBrands(): Array<{ brand: WalletBrand; label: string }> {
   return [
+    { brand: "lace", label: "Lace CIP-30 (preferred)" },
     { brand: "claim_url", label: "Claim URL only (recommended QR)" },
     { brand: "vespr", label: "VESPR browse" },
     { brand: "generic_cardano", label: "web+cardano experimental" },
     { brand: "eternl", label: "Eternl (claim page)" },
-    { brand: "lace", label: "Lace (claim page)" },
     { brand: "nami", label: "Nami (claim page)" },
     { brand: "typhon", label: "Typhon (claim page)" },
   ];
