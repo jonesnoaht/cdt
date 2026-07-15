@@ -22,7 +22,7 @@ OUT_DIR=./keys-pilot npm run keygen:pilot
 # creates keys-pilot/*.private.pem (0600) + *.spki.b64 + pilot.env.example
 ```
 
-**Rules**
+### Rules
 
 - Run on an air-gapped or controlled admin workstation when possible.
 - Two officers present: one generates, one records public SPKI hashes offline.
