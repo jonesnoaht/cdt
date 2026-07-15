@@ -107,14 +107,20 @@ export function resetRateLimits(): void {
 
 /** Paths that stay public even with API key mode. */
 export function isPublicPath(path: string): boolean {
-  return (
+  if (
     path === "/api/health" ||
     path === "/api/openapi.json" ||
     path === "/api/payment/contract" ||
     path === "/api/payment/oracle-pubkey" ||
     path === "/api/correspondent/meta" ||
     path === "/api/settlement/pubkey"
-  );
+  ) {
+    return true;
+  }
+  // Phone may open claim URL and complete without desk API key.
+  if (/^\/api\/sign-requests\/[a-f0-9]+$/i.test(path)) return true;
+  if (/^\/api\/sign-requests\/[a-f0-9]+\/complete$/i.test(path)) return true;
+  return false;
 }
 
 /**

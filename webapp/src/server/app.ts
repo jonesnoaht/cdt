@@ -28,6 +28,7 @@ import {
 } from "./presentments.js";
 import { DepositRegistry } from "./deposit-registry.js";
 import { PaymentOracle } from "./payment-oracle.js";
+import { SignRequestStore } from "./sign-requests.js";
 import {
   isPublicPath,
   publicOrAuthed,
@@ -130,6 +131,8 @@ export interface AppOptions {
   jwtSecret?: string;
   /** Optional deposit registry (tests inject). */
   depositRegistry?: DepositRegistry;
+  /** Optional sign-request store (tests inject). */
+  signRequestStore?: SignRequestStore;
 }
 
 interface MemberIdentity {
@@ -180,6 +183,7 @@ export function createApp(options: AppOptions): Hono {
     });
   void presentments.init();
   const paymentOracle = options.paymentOracle ?? new PaymentOracle();
+  const signRequests = options.signRequestStore ?? new SignRequestStore();
   const allowOpenApi = options.allowOpenApi === true;
   const apiKey =
     options.apiKey === null
@@ -222,6 +226,80 @@ export function createApp(options: AppOptions): Hono {
   });
 
   app.get("/api/health", (c) => c.json({ ok: true }));
+
+  /** Create a mobile wallet sign request (QR claim URL). */
+  app.post("/api/sign-requests", async (c) => {
+    let body: {
+      purpose?: string;
+      cborHex?: string;
+      depositId?: string;
+      presentmentId?: number;
+      description?: string;
+      publicBaseUrl?: string;
+      deepLinkTemplate?: string;
+      ttlMs?: number;
+      requiredSignerHint?: string;
+    };
+    try {
+      body = (await c.req.json()) as typeof body;
+    } catch {
+      return c.json({ error: "Request body must be JSON." }, 400);
+    }
+    if (!body.cborHex || typeof body.cborHex !== "string") {
+      return c.json({ error: "cborHex is required (unsigned tx CBOR hex)." }, 400);
+    }
+    const purpose = (body.purpose || "generic") as
+      | "redeem"
+      | "early_withdraw"
+      | "burn"
+      | "generic";
+    if (!["redeem", "early_withdraw", "burn", "generic"].includes(purpose)) {
+      return c.json({ error: "Invalid purpose." }, 400);
+    }
+    const publicBaseUrl =
+      body.publicBaseUrl?.trim() ||
+      `${c.req.header("x-forwarded-proto") ?? "http"}://${c.req.header("host") ?? "localhost"}/#`;
+    try {
+      const dto = await signRequests.create({
+        purpose,
+        cborHex: body.cborHex,
+        depositId: body.depositId,
+        presentmentId: body.presentmentId,
+        description: body.description,
+        publicBaseUrl,
+        deepLinkTemplate: body.deepLinkTemplate,
+        ttlMs: body.ttlMs,
+        requiredSignerHint: body.requiredSignerHint,
+      });
+      return c.json(dto, 201);
+    } catch (err) {
+      return c.json({ error: String(err) }, 400);
+    }
+  });
+
+  app.get("/api/sign-requests/:id", (c) => {
+    const id = c.req.param("id");
+    const result = signRequests.publicView(id, now());
+    if ("error" in result) {
+      return c.json({ error: result.error }, result.status as 404);
+    }
+    return c.json(result);
+  });
+
+  app.post("/api/sign-requests/:id/complete", async (c) => {
+    const id = c.req.param("id");
+    let body: { signedCborHex?: string; witnessCborHex?: string };
+    try {
+      body = (await c.req.json()) as typeof body;
+    } catch {
+      return c.json({ error: "Request body must be JSON." }, 400);
+    }
+    const result = signRequests.complete(id, body, now());
+    if ("error" in result) {
+      return c.json({ error: result.error }, result.status as 400 | 404 | 410 | 422);
+    }
+    return c.json(result);
+  });
 
   /**
    * Mint a short-lived institutional JWT.

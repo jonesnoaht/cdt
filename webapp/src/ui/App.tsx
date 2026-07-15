@@ -9,6 +9,7 @@ import { MemberPicker } from "./pages/MemberPicker.js";
 import { OpenCd } from "./pages/OpenCd.js";
 import { PresentForeign } from "./pages/PresentForeign.js";
 import { PaymentTerminal } from "./pages/PaymentTerminal.js";
+import { SignRequestPage } from "./pages/SignRequest.js";
 
 export const BRAND_NAME = import.meta.env.VITE_BRAND_NAME || "CampusUSA Credit Union";
 
@@ -20,12 +21,15 @@ type Route =
   | { page: "open" }
   | { page: "present" }
   | { page: "pay" }
+  | { page: "sign"; requestId?: string }
   | { page: "about" };
 
 function parseRoute(hash: string): Route {
   const path = hash.replace(/^#/, "");
   const cd = path.match(/^\/cd\/(\d+)$/);
   if (cd) return { page: "cd", txId: Number(cd[1]) };
+  const sign = path.match(/^\/sign(?:\/([a-f0-9]+))?$/i);
+  if (sign) return { page: "sign", requestId: sign[1] };
   if (path === "/open") return { page: "open" };
   if (path === "/present") return { page: "present" };
   if (path === "/pay") return { page: "pay" };
@@ -98,6 +102,9 @@ export function App() {
           <a href="#/pay" className={route.page === "pay" ? "is-active" : ""}>
             Payment terminal
           </a>
+          <a href="#/sign" className={route.page === "sign" ? "is-active" : ""}>
+            Wallet sign / QR
+          </a>
           <a href="#/about" className={route.page === "about" ? "is-active" : ""}>
             How it works
           </a>
@@ -123,6 +130,8 @@ export function App() {
           <PresentForeign />
         ) : route.page === "pay" ? (
           <PaymentTerminal />
+        ) : route.page === "sign" ? (
+          <SignRequestPage requestId={route.requestId} />
         ) : member === null ? (
           <MemberPicker members={members} onSelect={selectMember} />
         ) : route.page === "cd" ? (
