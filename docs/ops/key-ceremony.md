@@ -97,7 +97,19 @@ Query: `GET /api/deposit-registry/:depositId`
 | --- | --- | --- |
 | `pem` (default) | `ORACLE_SIGNING_KEY_PEM` | Production software path |
 | `ephemeral` | `ALLOW_EPHEMERAL_ORACLE_KEY=1` | Lab only |
-| `hsm` | `ORACLE_SIGNING_PROVIDER=hsm` + `ORACLE_HSM_MODULE` + `ORACLE_HSM_KEY_ID` | **Stub** — fails closed until PKCS#11 wired |
+| `remote` | `ORACLE_SIGNING_PROVIDER=remote` + `ORACLE_REMOTE_SIGNER_URL` (+ optional token/pubkey pin) | **HSM sidecar / enclave bridge** (lab: `scripts/remote-signer-lab.ts`) |
+| `hsm` | `ORACLE_SIGNING_PROVIDER=hsm` + `ORACLE_HSM_MODULE` + `ORACLE_HSM_KEY_ID` | **Stub** — fails closed until PKCS#11 native module |
+
+### Dual-control SettlementAuth
+
+```bash
+export SETTLEMENT_SIGNING_KEY_PEM=…           # primary desk
+export SETTLEMENT_SECONDARY_SIGNING_KEY_PEM=… # officer B (from key ceremony secondary)
+export SETTLEMENT_DUAL_CONTROL=1
+```
+
+`issue()` attaches both Ed25519 signatures over the same canonical payload;
+`verify()` rejects missing or wrong secondary cosign when dual control is on.
 
 ## 8. Settlement idempotency
 

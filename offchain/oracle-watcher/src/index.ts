@@ -13,6 +13,7 @@ export {
   buildAttestationPayload,
   centsToLovelace,
   signAttestation,
+  signAttestationWith,
   verifyAttestation,
   LOVELACE_PER_CENT,
   MS_PER_MONTH,
@@ -56,6 +57,7 @@ export {
   signingProviderFromEnv,
   PemSigningProvider,
   EphemeralSigningProvider,
+  RemoteSigningProvider,
   HsmSigningProvider,
   type SigningProvider,
 } from './signing-provider.js';

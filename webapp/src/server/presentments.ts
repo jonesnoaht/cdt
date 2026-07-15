@@ -58,6 +58,12 @@ function toAuthDto(auth: SignedSettlementAuth): SignedSettlementAuthDto {
     signature: auth.signature,
     algorithm: auth.algorithm,
     publicKeySpkiBase64: auth.publicKeySpkiBase64,
+    ...(auth.secondarySignature
+      ? {
+          secondarySignature: auth.secondarySignature,
+          secondaryPublicKeySpkiBase64: auth.secondaryPublicKeySpkiBase64,
+        }
+      : {}),
   };
 }
 
@@ -490,6 +496,8 @@ export class PresentmentStore {
         signature: p.settlementAuth.signature,
         algorithm: p.settlementAuth.algorithm,
         publicKeySpkiBase64: p.settlementAuth.publicKeySpkiBase64,
+        secondarySignature: p.settlementAuth.secondarySignature,
+        secondaryPublicKeySpkiBase64: p.settlementAuth.secondaryPublicKeySpkiBase64,
       },
       nowMs,
     );
@@ -556,6 +564,8 @@ export class PresentmentStore {
         signature: p.settlementAuth.signature,
         algorithm: p.settlementAuth.algorithm,
         publicKeySpkiBase64: p.settlementAuth.publicKeySpkiBase64,
+        secondarySignature: p.settlementAuth.secondarySignature,
+        secondaryPublicKeySpkiBase64: p.settlementAuth.secondaryPublicKeySpkiBase64,
       },
       nowMs,
     );

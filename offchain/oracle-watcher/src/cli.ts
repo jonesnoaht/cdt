@@ -6,7 +6,8 @@
  *   PGHOST / PGPORT / PGUSER / PGPASSWORD / PGDATABASE
  *   POLL_INTERVAL_MS
  *   ORACLE_SIGNING_KEY_PEM          — required unless ALLOW_EPHEMERAL_ORACLE_KEY=1
- *   ORACLE_SIGNING_PROVIDER         — pem (default) | hsm (stub)
+ *   ORACLE_SIGNING_PROVIDER         — pem (default) | remote | hsm (stub)
+ *   ORACLE_REMOTE_SIGNER_URL        — when provider=remote
  *   CDT_VC_MODE                     — fail_closed | accept_all | credentials
  *   CDT_ORACLE_ACCEPT_ALL_VC=1      — alias for accept_all (LAB ONLY)
  *
@@ -40,9 +41,18 @@ async function main(): Promise<void> {
   }
   if (signer.kind === "hsm") {
     console.error(
-      "oracle-watcher: HSM provider selected but not implemented — wire PKCS#11 first.",
+      "oracle-watcher: HSM PKCS#11 provider selected but not implemented — use ORACLE_SIGNING_PROVIDER=remote for an HSM sidecar.",
     );
     process.exit(1);
+  }
+
+  // Remote needs a pin or one warm-up sign to learn the public key.
+  if (signer.kind === "remote") {
+    try {
+      signer.publicKeySpkiBase64();
+    } catch {
+      await signer.signUtf8Message("oracle-watcher-pubkey-probe");
+    }
   }
 
   const pubB64 = signer.publicKeySpkiBase64();
@@ -70,22 +80,16 @@ async function main(): Promise<void> {
     console.warn(m),
   );
 
-  const privateKey = signer.privateKeyObject?.();
-  if (!privateKey) {
-    console.error("oracle-watcher: signing provider has no KeyObject (HSM path not ready).");
-    process.exit(1);
-  }
-
   const watcher = new OracleWatcher({
     pool,
-    oraclePrivateKey: privateKey,
+    signingProvider: signer,
+    oraclePrivateKey: signer.privateKeyObject?.(),
     pollIntervalMs: config.pollIntervalMs,
     verifyPresentation,
     onAttested: async (attestation) => {
       console.log(
         `oracle-watcher: attestation ready deposit=${attestation.payload.deposit_id} account=${attestation.payload.account_id} hash=${attestation.attestation_hash_hex}`,
       );
-      // Best-effort deposit_registry write (issuer one-shot control plane).
       try {
         await pool.query(
           `INSERT INTO deposit_registry (deposit_id, account_id, attestation_hash, state)

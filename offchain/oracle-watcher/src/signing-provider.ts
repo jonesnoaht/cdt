@@ -2,8 +2,9 @@
  * Pluggable signing for the mint oracle (and future HSM).
  *
  * Modes (env ORACLE_SIGNING_PROVIDER):
- *   pem   — default; load ORACLE_SIGNING_KEY_PEM (or ephemeral lab key)
- *   hsm   — stub; fails closed until PKCS#11 / cloud HSM is wired
+ *   pem      — default; load ORACLE_SIGNING_KEY_PEM (or ephemeral lab key)
+ *   remote   — HTTP remote signer (HSM sidecar / enclave bridge)
+ *   hsm      — PKCS#11 path; fails closed until native module is wired
  *
  * Callers use signUtf8Message(); public SPKI is for pins/logs only.
  */
@@ -19,7 +20,7 @@ import {
 } from "./keys.js";
 
 export interface SigningProvider {
-  readonly kind: "pem" | "hsm" | "ephemeral";
+  readonly kind: "pem" | "hsm" | "ephemeral" | "remote";
   /** Base64 SPKI DER — pin this, never the private material. */
   publicKeySpkiBase64(): string;
   /** Ed25519 sign over UTF-8 message → base64 signature. */
@@ -76,8 +77,81 @@ export class EphemeralSigningProvider implements SigningProvider {
 }
 
 /**
- * Placeholder for PKCS#11 / Cloud HSM / AWS KMS Ed25519.
- * Fail-closed until ORACLE_HSM_MODULE + key id are implemented.
+ * HTTP remote signer — production shape for an HSM sidecar / signing enclave.
+ *
+ * Protocol (POST ORACLE_REMOTE_SIGNER_URL):
+ *   request:  { "message": "<utf8 string>" }
+ *   response: { "signature": "<base64>", "publicKeySpkiBase64": "<base64>" }
+ *
+ * Optional Authorization: Bearer ORACLE_REMOTE_SIGNER_TOKEN
+ */
+export class RemoteSigningProvider implements SigningProvider {
+  readonly kind = "remote" as const;
+  private readonly url: string;
+  private readonly token?: string;
+  private readonly pinnedPub?: string;
+  private readonly fetchImpl: typeof fetch;
+  private cachedPub?: string;
+
+  constructor(opts: {
+    url: string;
+    token?: string;
+    publicKeySpkiBase64?: string;
+    fetchImpl?: typeof fetch;
+  }) {
+    this.url = opts.url;
+    this.token = opts.token;
+    this.pinnedPub = opts.publicKeySpkiBase64;
+    this.fetchImpl = opts.fetchImpl ?? fetch;
+  }
+
+  publicKeySpkiBase64(): string {
+    if (this.pinnedPub) return this.pinnedPub;
+    if (this.cachedPub) return this.cachedPub;
+    throw new Error(
+      "RemoteSigningProvider: pin ORACLE_REMOTE_SIGNER_PUBKEY_SPKI or sign once to learn public key",
+    );
+  }
+
+  async signUtf8Message(message: string): Promise<string> {
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      accept: "application/json",
+    };
+    if (this.token) headers.authorization = `Bearer ${this.token}`;
+    const res = await this.fetchImpl(this.url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ message }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(
+        `RemoteSigningProvider: signer HTTP ${res.status} ${text.slice(0, 200)}`,
+      );
+    }
+    const body = (await res.json()) as {
+      signature?: string;
+      publicKeySpkiBase64?: string;
+    };
+    if (!body.signature || typeof body.signature !== "string") {
+      throw new Error("RemoteSigningProvider: response missing signature");
+    }
+    if (body.publicKeySpkiBase64) {
+      if (this.pinnedPub && body.publicKeySpkiBase64 !== this.pinnedPub) {
+        throw new Error(
+          "RemoteSigningProvider: signer public key does not match pin",
+        );
+      }
+      this.cachedPub = body.publicKeySpkiBase64;
+    }
+    return body.signature;
+  }
+}
+
+/**
+ * PKCS#11 / Cloud HSM path — fails closed until a native module is linked.
+ * Prefer ORACLE_SIGNING_PROVIDER=remote for HSM sidecars in the meantime.
  */
 export class HsmSigningProvider implements SigningProvider {
   readonly kind = "hsm" as const;
@@ -88,7 +162,8 @@ export class HsmSigningProvider implements SigningProvider {
 
   publicKeySpkiBase64(): string {
     throw new Error(
-      `HsmSigningProvider not implemented (module=${this.modulePath}, keyId=${this.keyId}). Wire PKCS#11 or cloud HSM.`,
+      `HsmSigningProvider not implemented (module=${this.modulePath}, keyId=${this.keyId}). ` +
+        `Use ORACLE_SIGNING_PROVIDER=remote for an HSM sidecar, or wire PKCS#11.`,
     );
   }
 
@@ -103,6 +178,19 @@ export function signingProviderFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): SigningProvider {
   const mode = (env.ORACLE_SIGNING_PROVIDER || "pem").toLowerCase();
+  if (mode === "remote") {
+    const url = env.ORACLE_REMOTE_SIGNER_URL || "";
+    if (!url) {
+      throw new Error(
+        "ORACLE_SIGNING_PROVIDER=remote requires ORACLE_REMOTE_SIGNER_URL",
+      );
+    }
+    return new RemoteSigningProvider({
+      url,
+      token: env.ORACLE_REMOTE_SIGNER_TOKEN,
+      publicKeySpkiBase64: env.ORACLE_REMOTE_SIGNER_PUBKEY_SPKI,
+    });
+  }
   if (mode === "hsm") {
     const modulePath = env.ORACLE_HSM_MODULE || "";
     const keyId = env.ORACLE_HSM_KEY_ID || "";
@@ -119,6 +207,6 @@ export function signingProviderFromEnv(
     return new EphemeralSigningProvider();
   }
   throw new Error(
-    "ORACLE_SIGNING_KEY_PEM is required (or ALLOW_EPHEMERAL_ORACLE_KEY=1 for lab, or ORACLE_SIGNING_PROVIDER=hsm)",
+    "ORACLE_SIGNING_KEY_PEM is required (or ALLOW_EPHEMERAL_ORACLE_KEY=1 for lab, or ORACLE_SIGNING_PROVIDER=remote|hsm)",
   );
 }
