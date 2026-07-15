@@ -6,40 +6,47 @@
  *   PGHOST / PGPORT / PGUSER / PGPASSWORD / PGDATABASE
  *   POLL_INTERVAL_MS
  *   ORACLE_SIGNING_KEY_PEM          — required unless ALLOW_EPHEMERAL_ORACLE_KEY=1
+ *   ORACLE_SIGNING_PROVIDER         — pem (default) | hsm (stub)
  *   CDT_VC_MODE                     — fail_closed | accept_all | credentials
  *   CDT_ORACLE_ACCEPT_ALL_VC=1      — alias for accept_all (LAB ONLY)
  *
  * credentials mode enrolls every accounts.did with a full NCUA→CU→member
  * chain (@cdt/credentials) and verifies a fresh presentation per poll.
  */
-import { createPublicKey } from "node:crypto";
 import {
   BankCredentialDirectory,
   verifyHookForMode,
 } from "./bank-credentials.js";
 import { vcModeFromEnv } from "./credentials-hook.js";
-import { generateEd25519KeyPair, privateKeyFromPem, publicKeyToBase64 } from "./keys.js";
 import { createPool, loadConfig } from "./config.js";
+import { signingProviderFromEnv } from "./signing-provider.js";
 import { OracleWatcher } from "./watcher.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
 
-  const pem = process.env.ORACLE_SIGNING_KEY_PEM;
-  const allowEphemeral = process.env.ALLOW_EPHEMERAL_ORACLE_KEY === "1";
-  if (!pem && !allowEphemeral) {
+  let signer;
+  try {
+    signer = signingProviderFromEnv();
+  } catch (err) {
+    console.error(`oracle-watcher: ${String(err)}`);
+    process.exit(1);
+  }
+
+  if (signer.kind === "ephemeral") {
+    console.warn(
+      "oracle-watcher: ALLOW_EPHEMERAL_ORACLE_KEY=1 — throwaway signing key (public only logged).",
+    );
+  }
+  if (signer.kind === "hsm") {
     console.error(
-      "oracle-watcher: ORACLE_SIGNING_KEY_PEM is required (set ALLOW_EPHEMERAL_ORACLE_KEY=1 only for local lab demos).",
+      "oracle-watcher: HSM provider selected but not implemented — wire PKCS#11 first.",
     );
     process.exit(1);
   }
-  const privateKey = pem ? privateKeyFromPem(pem) : generateEd25519KeyPair().privateKey;
-  if (!pem) {
-    console.warn(
-      "oracle-watcher: ALLOW_EPHEMERAL_ORACLE_KEY=1 — generated a throwaway signing key (public only logged).",
-    );
-  }
-  const pubB64 = publicKeyToBase64(createPublicKey(privateKey));
+
+  const pubB64 = signer.publicKeySpkiBase64();
+  console.log(`oracle-watcher: signing provider = ${signer.kind}`);
   console.log(`oracle-watcher: oracle public key (base64 SPKI): ${pubB64}`);
   console.log(
     `oracle-watcher: polling ${config.pg.host}:${config.pg.port}/${config.pg.database} every ${config.pollIntervalMs}ms`,
@@ -63,15 +70,47 @@ async function main(): Promise<void> {
     console.warn(m),
   );
 
+  const privateKey = signer.privateKeyObject?.();
+  if (!privateKey) {
+    console.error("oracle-watcher: signing provider has no KeyObject (HSM path not ready).");
+    process.exit(1);
+  }
+
   const watcher = new OracleWatcher({
     pool,
     oraclePrivateKey: privateKey,
     pollIntervalMs: config.pollIntervalMs,
     verifyPresentation,
-    onAttested: (attestation) => {
+    onAttested: async (attestation) => {
       console.log(
         `oracle-watcher: attestation ready deposit=${attestation.payload.deposit_id} account=${attestation.payload.account_id} hash=${attestation.attestation_hash_hex}`,
       );
+      // Best-effort deposit_registry write (issuer one-shot control plane).
+      try {
+        await pool.query(
+          `INSERT INTO deposit_registry (deposit_id, account_id, attestation_hash, state)
+           VALUES ($1, $2, $3, 'attested')
+           ON CONFLICT (deposit_id) DO UPDATE SET
+             account_id = EXCLUDED.account_id,
+             attestation_hash = CASE
+               WHEN deposit_registry.attestation_hash = '' THEN EXCLUDED.attestation_hash
+               ELSE deposit_registry.attestation_hash
+             END,
+             updated_at = now()
+           WHERE deposit_registry.state <> 'burned'`,
+          [
+            attestation.payload.deposit_id,
+            attestation.payload.account_id,
+            attestation.attestation_hash_hex,
+          ],
+        );
+      } catch (err) {
+        if (!/does not exist|undefined_table/i.test(String(err))) {
+          console.warn(
+            `oracle-watcher: deposit_registry write failed: ${String(err)}`,
+          );
+        }
+      }
     },
   });
 

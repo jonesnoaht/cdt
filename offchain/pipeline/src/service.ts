@@ -294,6 +294,9 @@ export class IssuanceService {
     const assetName = fromText(depositId);
     const unit = toUnit(chain.scripts.policyId, assetName);
 
+    const { registryAssertMintable } = await import("./deposit-registry.js");
+    await registryAssertMintable(this.pool, depositId);
+
     if (
       !verifyAttestation(
         attestation,
@@ -398,6 +401,27 @@ export class IssuanceService {
         WHERE deposit_id = $1`,
       [depositId, txHash, unit],
     );
+    // Best-effort registry — must never block mint write-back / confirmation.
+    try {
+      const { rows } = await this.pool.query(
+        `SELECT account_id, attestation_hash FROM attestations WHERE deposit_id = $1`,
+        [depositId],
+      );
+      const accountId =
+        rows[0]?.account_id != null ? String(rows[0].account_id) : "";
+      const attestationHash =
+        rows[0]?.attestation_hash != null ? String(rows[0].attestation_hash) : "";
+      const { registryRecordMinted } = await import("./deposit-registry.js");
+      await registryRecordMinted(
+        this.pool,
+        { depositId, mintTxHash: txHash, accountId, attestationHash },
+        this.log,
+      );
+    } catch (err) {
+      this.log.warn(
+        `pipeline: deposit_registry mint write skipped for ${depositId}: ${String(err)}`,
+      );
+    }
   }
 
   /** Look up the (single) vault UTxO holding the deposit's CDT. */

@@ -83,7 +83,7 @@ Terminate TLS at a reverse proxy; never expose Postgres or the API on a public i
 | **ACH/FedNow integration** | SettlementPayment is an audit record | **Mock rail:** `SETTLEMENT_RAIL=mock\|log\|none` (`settlement-rail.ts`) |
 | **Oracle VC path** | Fail-closed / accept-all | **credentials mode** enrolls bank DIDs via `@cdt/credentials` (`BankCredentialDirectory`) |
 | **mTLS / institutional JWT** | Spec inter-CU auth | **Dual API keys + HS256 JWT:** `CDT_JWT_SECRET`, `POST /api/auth/token`, Bearer role claims; dual keys still supported |
-| **HSM / dual control** | Mint oracle and settlement keys | Open |
+| **HSM / dual control** | Mint oracle and settlement keys | **Process:** key ceremony; **software:** `SigningProvider` pem/hsm stub (`ORACLE_SIGNING_PROVIDER`); HSM PKCS#11 still open |
 | **Professional SC audit** | Aiken validators + economic model | Open |
 | **One-shot on-chain deposit registry** | Global uniqueness | **Off-chain pilot:** `deposit_registry` (`attested→minted→burned`) + `GET /api/deposit-registry/:id`; on-chain still open |
 | **Key ceremony / dual control** | Ops process + PEMs | **Done:** `docs/ops/key-ceremony.md` + `npm run keygen:pilot` |
