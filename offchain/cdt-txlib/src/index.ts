@@ -5,6 +5,10 @@ export {
   MintRedeemerSchema,
   VaultRedeemer,
   VaultRedeemerSchema,
+  DepositRegistryDatum,
+  DepositRegistryDatumSchema,
+  DepositRegistryRedeemer,
+  DepositRegistryRedeemerSchema,
 } from "./types.js";
 
 export {
@@ -41,3 +45,13 @@ export {
   type RedeemTxParams,
   type RedeemTxResult,
 } from "./builders.js";
+
+export {
+  encodeDepositRegistryDatum,
+  decodeDepositRegistryDatum,
+  encodeRegisterDepositRedeemer,
+  planRegistryAppend,
+  planRegistryMintCospend,
+  onchainRegistryRequired,
+  type RegistryMintCospendPlan,
+} from "./deposit-registry.js";

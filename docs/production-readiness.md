@@ -61,6 +61,8 @@ export CDT_TLS_KEY_FILE=/etc/cdt/client.key
 export CDT_TLS_CA_FILE=/etc/cdt/ca.crt
 # never in production: CDT_TLS_REJECT_UNAUTHORIZED=0
 export HOST=127.0.0.1
+export ONCHAIN_REGISTRY_REQUIRED=1
+export ONCHAIN_REGISTRY_UTXO_REF='<txHash>#<index>'   # when co-spend attached
 export CDT_VC_MODE=credentials
 export CDT_TRUSTED_ROOT_DID='did:…'
 export CDT_PRESENTATION_DIR=/var/cdt/presentations
@@ -87,16 +89,17 @@ Terminate TLS at a reverse proxy; never expose Postgres or the API on a public i
 | **Hyperledger Identus / did:prism** | Replace mock DID/VC | **HTTP client + path map + mTLS:** `IDENTUS_PATH_*`, `docs/ops/identus-path-mapping.md`, `CDT_TLS_*` |
 | **Settlement audit** | Immutable transition log | **Done:** `presentment_events` + `GET /api/presentments/:id/events` |
 | **SettlementAuth binding** | Auth must match claim + stay valid | **Done:** deposit_id match + signature/TTL re-check on burn + accept |
-| **On-chain burn validation** | Prove burn tx burns deposit CDT | **Done (Koios):** negative mint qty **exactly -1** for deposit asset; optional policy pin |
+| **On-chain burn validation** | Prove burn tx burns deposit CDT | **Done (Koios):** qty **exactly -1** + soft script/redeemer signals |
 | **ACH/FedNow integration** | SettlementPayment is an audit record | **HTTP + optional mTLS:** `SETTLEMENT_RAIL=http` + `SETTLEMENT_ACH_URL` + `CDT_TLS_*` |
 | **mTLS / institutional JWT** | Spec inter-CU auth | **JWT/keys done** + **outbound mTLS** via `CDT_TLS_CERT/KEY/CA_FILE` for ACH/IDV/Identus |
 | **Oracle VC path** | Fail-closed / accept-all | **credentials mode** + Identus HTTP path map |
 | **HSM / dual control** | Mint oracle and settlement keys | **Dual-control SettlementAuth cosign** (`SETTLEMENT_DUAL_CONTROL`); oracle **remote signer** (`ORACLE_SIGNING_PROVIDER=remote`) + PKCS#11 stub |
 | **Professional SC audit** | Aiken validators + economic model | **Pre-audit package:** `docs/ops/sc-audit-brief.md` (engagement not executed) |
-| **One-shot on-chain deposit registry** | Global uniqueness | **Off-chain done** + **design + Aiken scaffold** (`docs/ops/on-chain-deposit-registry.md`, `deposit_registry.ak`); mint co-spend open |
+| **One-shot on-chain deposit registry** | Global uniqueness | **Co-spend ready:** `deposit_registry(cdt_policy)` requires mint +1; txlib `planRegistryMintCospend`; pipeline `ONCHAIN_REGISTRY_REQUIRED` gate; Lucid attach open |
 | **Key ceremony / dual control** | Ops process + PEMs | **Done:** `docs/ops/key-ceremony.md` + `npm run keygen:pilot` |
 | **Settlement idempotency** | Safe retries | **Done:** `Idempotency-Key` on settlement-payment |
-| **Mobile wallet sign / QR** | Member signs redeem/burn on phone | **Done:** sign-requests + `#/sign` + wallet deep-link catalog |
+| **Mobile wallet sign / QR** | Member signs redeem/burn on phone | **Done:** sign-requests + `#/sign` + **`POST …/presentments/:id/sign-burn`** |
+| **Wallet-held presentations** | Mint-time VP from member wallet | **Done (library):** `WalletPresentationStore` in `@cdt/credentials` |
 | **IDV / CIP systems** | Desk checkboxes remain demo | **Adapter:** `CDT_IDV_MODE=mock\|http`, `POST /api/idv/check`, optional `CDT_IDV_REQUIRE=1` on presentments |
 | **OpenAPI** | Machine-readable settlement API | **Done:** `docs/openapi/settlement-v1.yaml`, `GET /api/openapi.json` |
 

@@ -208,6 +208,7 @@ QR encodes the **claim URL**, not Bluetooth. Wallet deep-link catalog on the res
 | SettlementPayment | `POST /api/presentments/:id/settlement-payment` |
 | Audit events | `GET /api/presentments/:id/events` |
 | Deposit registry | `GET /api/deposit-registry/:depositId` |
+| Sign burn (QR) | `POST /api/presentments/:id/sign-burn` `{ cborHex }` |
 | Settlement pubkey | `GET /api/settlement/pubkey` |
 | Mint JWT | `POST /api/auth/token` |
 | IDV check | `POST /api/idv/check` |

@@ -1,24 +1,21 @@
-//// One-shot deposit registry (scaffold).
+//// One-shot deposit registry — mint co-spend ready.
 ////
-//// Status: DESIGN SCAFFOLD — not yet parameterized into cdt_mint production
-//// mint path. See docs/ops/on-chain-deposit-registry.md.
+//// Parameter: `cdt_policy` — the CDT mint policy this registry guards.
 ////
-//// Intent: hold a UTxO whose datum lists used deposit_ids. Spending it to
-//// append a new id must co-occur with minting that asset under the CDT
-//// policy (enforced when this validator is linked in a future mint redesign).
+//// RegisterDeposit { deposit_id }:
+////   * admin must co-sign
+////   * deposit_id not already in used
+////   * same tx mints exactly +1 of deposit_id under cdt_policy
+////   * (builder continuity) output returns next_datum — enforced off-chain
+////     until multi-output inspection is wired; try_append is enforced here.
 ////
-//// Continuity contract for the mint co-spend (off-chain builder MUST ensure):
-////   1. Exactly one input is this registry script UTxO (own_ref).
-////   2. Exactly one output returns to the same script address with inline datum
-////      DepositRegistryDatum { admin: d.admin, used: try_append(d.used, id) }.
-////   3. Same tx mints +1 of deposit_id under the CDT policy (oracle co-sign).
-////
-//// Current code: validates structural rules for RegisterDeposit in isolation
-//// so the module typechecks; full output continuity lands with mint wiring.
+//// See docs/ops/on-chain-deposit-registry.md.
 
+use aiken/collection/dict
 use aiken/collection/list
 use aiken/crypto.{VerificationKeyHash}
 use aiken/primitive/bytearray
+use cardano/assets.{PolicyId}
 use cardano/transaction.{OutputReference, Transaction}
 
 /// Pilot datum: admin VKH + list of used deposit_id bytearrays.
@@ -31,12 +28,10 @@ pub type DepositRegistryRedeemer {
   RegisterDeposit { deposit_id: ByteArray }
 }
 
-/// True if `id` already appears in the used set.
 fn is_used(used: List<ByteArray>, id: ByteArray) -> Bool {
   list.any(used, fn(x) { x == id })
 }
 
-/// Append id if not present; None if already used or empty id.
 fn try_append(
   used: List<ByteArray>,
   id: ByteArray,
@@ -51,7 +46,7 @@ fn try_append(
 }
 
 /// Expected successor datum after a successful RegisterDeposit.
-fn next_datum(
+pub fn next_datum(
   d: DepositRegistryDatum,
   deposit_id: ByteArray,
 ) -> Option<DepositRegistryDatum> {
@@ -61,7 +56,13 @@ fn next_datum(
   }
 }
 
-validator deposit_registry {
+/// True when this tx mints exactly +1 of `deposit_id` under `cdt_policy`.
+fn mints_exactly_one(self: Transaction, cdt_policy: PolicyId, deposit_id: ByteArray) -> Bool {
+  let pairs = assets.tokens(self.mint, cdt_policy) |> dict.to_pairs
+  pairs == [Pair(deposit_id, 1)]
+}
+
+validator deposit_registry(cdt_policy: PolicyId) {
   spend(
     datum: Option<DepositRegistryDatum>,
     redeemer: DepositRegistryRedeemer,
@@ -71,17 +72,14 @@ validator deposit_registry {
     expect Some(d) = datum
     when redeemer is {
       RegisterDeposit { deposit_id } -> {
-        // Admin must authorize registry updates in this scaffold.
-        // Production may replace with mint-policy linkage (no admin sig).
         and {
           list.has(self.extra_signatories, d.admin),
           when next_datum(d, deposit_id) is {
             Some(_) -> True
             None -> False
           },
-          // Output continuity + mint co-spend checked by surrounding tx builder
-          // until cdt_mint is re-parameterized with this registry script hash.
-          True,
+          // Mint co-spend: same tx must mint exactly one CDT for this deposit.
+          mints_exactly_one(self, cdt_policy, deposit_id),
         }
       }
     }

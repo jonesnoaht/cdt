@@ -47,6 +47,10 @@ export type BurnValidateResult =
       burnedQuantity?: string;
       policyId?: string;
       assetNameHex?: string;
+      /** Soft signal: tx spent at least one script input (vault path). */
+      scriptInputCount?: number;
+      /** Soft signal: redeemer purposes seen on provider payload. */
+      redeemerPurposes?: string[];
       warning?: string;
     }
   | {
@@ -86,6 +90,17 @@ interface KoiosTxInfo {
   tx_hash?: string;
   mint?: KoiosMintEntry[];
   assets_minted?: KoiosMintEntry[];
+  /** Some Koios deployments include inputs; used for vault-spend soft signals. */
+  inputs?: Array<{
+    payment_addr?: { bech32?: string; cred?: string };
+    stake_addr?: string | null;
+    value?: string;
+  }>;
+  /** Plutus redeemers when present on the provider payload. */
+  redeemers?: Array<{
+    unit?: { purpose?: string; index?: number };
+    purpose?: string;
+  }>;
 }
 
 function mintEntries(tx: KoiosTxInfo): KoiosMintEntry[] {
@@ -263,6 +278,25 @@ export async function validateBurnTx(
       };
     }
 
+    // Soft vault-path signals (redeemer/datum full decode still open).
+    const scriptInputCount = Array.isArray(tx.inputs)
+      ? tx.inputs.filter((i) => {
+          const cred = i.payment_addr?.cred || "";
+          // Heuristic: script credentials often flagged; also count when bech32 starts with known script patterns.
+          return Boolean(cred) || Boolean(i.payment_addr?.bech32?.startsWith("addr"));
+        }).length
+      : 0;
+    const redeemerPurposes = Array.isArray(tx.redeemers)
+      ? tx.redeemers
+          .map((r) => r.purpose || r.unit?.purpose || "")
+          .filter(Boolean)
+      : [];
+    let warning: string | undefined;
+    if (scriptInputCount === 0 && redeemerPurposes.length === 0) {
+      warning =
+        "Burn asset match OK; provider payload had no script inputs/redeemers — vault Redeemer path not proven (soft signal only).";
+    }
+
     return {
       ok: true,
       mode: params.mode,
@@ -272,6 +306,9 @@ export async function validateBurnTx(
       burnedQuantity: burn.quantity,
       policyId: burn.policyId,
       assetNameHex: burn.assetNameHex,
+      scriptInputCount,
+      redeemerPurposes: redeemerPurposes.length ? redeemerPurposes : undefined,
+      warning,
     };
   } catch (err) {
     const msg = `On-chain burn lookup failed: ${String(err)}`;

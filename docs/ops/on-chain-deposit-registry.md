@@ -100,8 +100,10 @@ Pipeline mint flow becomes:
 | --- | --- |
 | Off-chain table + APIs | **Done** |
 | Design (this doc) | **Done** |
-| Aiken `deposit_registry` validator | **Scaffold** — see `onchain/validators/deposit_registry.ak` (documented stub; not linked into production mint yet) |
-| Pipeline co-spend | Open |
+| Aiken `deposit_registry(cdt_policy)` | **Mint co-spend rule:** same tx mints exactly +1 of `deposit_id` under policy; admin co-sign; `next_datum` |
+| `@cdt/txlib` plan helpers | **Done:** `planRegistryMintCospend`, encode/decode datum+redeemer |
+| Pipeline gate | **Done:** `ONCHAIN_REGISTRY_REQUIRED=1` + `ONCHAIN_REGISTRY_UTXO_REF` fail-closed |
+| Full Lucid spend+pay in mint tx | Open (attach plan redeemer to registry UTxO in builder) |
 | Mainnet deployment of registry UTxO | Open |
 
 ## Acceptance criteria (when “done”)
