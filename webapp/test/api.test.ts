@@ -371,12 +371,16 @@ describe("correspondent presentment", () => {
     const cashOut = (ok.body as { cashOutCents: number }).cashOutCents;
     const paid = await post(`/api/presentments/${id}/settlement-payment`, {
       amountCents: cashOut,
-      rail: "ACH",
-      traceId: "trace-demo-1",
     });
     expect(paid.status).toBe(200);
     expect((paid.body as { status: string }).status).toBe("settled");
-
+    expect(
+      (paid.body as { settlementPayment: { rail: string; traceId: string } }).settlementPayment
+        .rail,
+    ).toMatch(/ACH/i);
+    expect(
+      (paid.body as { settlementPayment: { traceId: string } }).settlementPayment.traceId.length,
+    ).toBeGreaterThan(4);
     const wrongName = await post("/api/presentments", {
       claimRef: String(fx.cds.maturedTxId),
       walkInName: "Impostor",

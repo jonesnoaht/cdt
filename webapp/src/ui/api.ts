@@ -72,6 +72,32 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     }),
+  authorizePresentment: (id: number) =>
+    request<PresentmentDto>(`/api/presentments/${id}/authorize`, { method: "POST" }),
+  submitBurnEvidence: (id: number, body: { txHash: string; mode?: string }) =>
+    request<PresentmentDto>(`/api/presentments/${id}/burn-evidence`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  acceptBurn: (id: number) =>
+    request<PresentmentDto>(`/api/presentments/${id}/accept-burn`, { method: "POST" }),
+  settlementPayment: (
+    id: number,
+    body: { amountCents: number; rail?: string; traceId?: string },
+  ) =>
+    request<PresentmentDto>(`/api/presentments/${id}/settlement-payment`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  settlementPubkey: () =>
+    request<{
+      algorithm: string;
+      publicKeySpkiBase64: string;
+      purpose: string;
+      issuerInstitutionId: string;
+    }>("/api/settlement/pubkey"),
   paymentContract: () =>
     request<{
       name: string;

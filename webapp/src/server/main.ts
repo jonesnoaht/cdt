@@ -3,10 +3,10 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { existsSync } from "node:fs";
 import pg from "pg";
+import { PaymentOracle } from "./payment-oracle.js";
+import { settlementRailFromEnv } from "./settlement-rail.js";
 import { createApp } from "./app.js";
 import { configFromEnv } from "./config.js";
-import { PaymentOracle } from "./payment-oracle.js";
-
 const config = configFromEnv();
 const pool = new pg.Pool(config.db);
 
@@ -37,6 +37,7 @@ const app = createApp({
   paymentOracle,
   burnValidateMode: config.burnValidateMode,
   cdtPolicyId: config.cdtPolicyId,
+  settlementRail: settlementRailFromEnv(),
 });
 
 // Serve the built UI when it exists (vite build → dist/ui), so the API

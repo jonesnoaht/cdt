@@ -73,7 +73,8 @@ Terminate TLS at a reverse proxy; never expose Postgres or the API on a public i
 | --- | --- | --- |
 | **Hyperledger Identus / did:prism** | Replace mock DID/VC | **Skeleton:** `credentials/src/identus.ts` (`IDENTUS_MODE=mock\|http`) |
 | **On-chain burn validation** | Prove burn tx burns deposit CDT | **Done (Koios):** `BURN_VALIDATE_MODE=strict` + `CHAIN_PROVIDER=koios-preview`; optional `CDT_POLICY_ID` |
-| **ACH/FedNow integration** | SettlementPayment is an audit record | Open |
+| **ACH/FedNow integration** | SettlementPayment is an audit record | **Mock rail:** `SETTLEMENT_RAIL=mock\|log\|none` (`settlement-rail.ts`) |
+| **Oracle VC path** | Fail-closed / accept-all | **credentials mode** enrolls bank DIDs via `@cdt/credentials` (`BankCredentialDirectory`) |
 | **mTLS / institutional JWT** | Spec inter-CU auth | Open |
 | **HSM / dual control** | Mint oracle and settlement keys | Open |
 | **Professional SC audit** | Aiken validators + economic model | Open |

@@ -30,7 +30,10 @@ export function PresentForeign() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [ticket, setTicket] = useState<PresentmentDto | null>(null);
   const [history, setHistory] = useState<PresentmentDto[]>([]);
-
+  const [burnTxHash, setBurnTxHash] = useState("");
+  const [settleBusy, setSettleBusy] = useState(false);
+  const [settleError, setSettleError] = useState<string | null>(null);
+  const [settleNote, setSettleNote] = useState<string | null>(null);
   useEffect(() => {
     api
       .correspondentMeta()
@@ -92,8 +95,96 @@ export function PresentForeign() {
     setOwnershipProof(false);
     setLookupError(null);
     setSubmitError(null);
+    setBurnTxHash("");
+    setSettleError(null);
+    setSettleNote(null);
   };
 
+  const refreshTicket = async (id: number) => {
+    const t = await api.presentment(id);
+    setTicket(t);
+    const list = await api.presentments();
+    setHistory(list);
+    return t;
+  };
+
+  const runAuthorize = async () => {
+    if (!ticket) return;
+    setSettleBusy(true);
+    setSettleError(null);
+    setSettleNote(null);
+    try {
+      const t = await api.authorizePresentment(ticket.id);
+      setTicket(t);
+      setSettleNote("SettlementAuth issued (signed, burn_required, TTL). Pin issuer pubkey before trusting.");
+      await refreshTicket(t.id);
+    } catch (err) {
+      setSettleError(err instanceof ApiRequestError ? err.message : String(err));
+    } finally {
+      setSettleBusy(false);
+    }
+  };
+
+  const runBurnEvidence = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!ticket) return;
+    setSettleBusy(true);
+    setSettleError(null);
+    setSettleNote(null);
+    try {
+      const t = await api.submitBurnEvidence(ticket.id, {
+        txHash: burnTxHash.trim(),
+        mode: ticket.cashOutMode === "mature" ? "redeem" : "early_withdraw",
+      });
+      setTicket(t);
+      setSettleNote("BurnEvidence recorded. Issuer must accept-burn (on-chain validation when configured).");
+      await refreshTicket(t.id);
+    } catch (err) {
+      setSettleError(err instanceof ApiRequestError ? err.message : String(err));
+    } finally {
+      setSettleBusy(false);
+    }
+  };
+
+  const runAcceptBurn = async () => {
+    if (!ticket) return;
+    setSettleBusy(true);
+    setSettleError(null);
+    setSettleNote(null);
+    try {
+      const t = await api.acceptBurn(ticket.id);
+      setTicket(t);
+      setSettleNote("Burn accepted. Ready for SettlementPayment (mock ACH by default).");
+      await refreshTicket(t.id);
+    } catch (err) {
+      setSettleError(err instanceof ApiRequestError ? err.message : String(err));
+    } finally {
+      setSettleBusy(false);
+    }
+  };
+
+  const runSettlement = async () => {
+    if (!ticket) return;
+    setSettleBusy(true);
+    setSettleError(null);
+    setSettleNote(null);
+    try {
+      const t = await api.settlementPayment(ticket.id, {
+        amountCents: ticket.cashOutCents,
+      });
+      setTicket(t);
+      setSettleNote(
+        t.settlementPayment
+          ? `Settled via ${t.settlementPayment.rail} (trace ${t.settlementPayment.traceId}).`
+          : "Settled.",
+      );
+      await refreshTicket(t.id);
+    } catch (err) {
+      setSettleError(err instanceof ApiRequestError ? err.message : String(err));
+    } finally {
+      setSettleBusy(false);
+    }
+  };
   if (loadError) return <ErrorNote message={loadError} />;
   if (!meta) return <Spinner label="Loading correspondent desk…" />;
 
@@ -319,9 +410,9 @@ export function PresentForeign() {
             </li>
           </ul>
           <div className="note">
-            You will advance <strong>{money(claim.cashOutCents ?? 0)}</strong> from this
-            CU&apos;s cash, then collect settlement from {claim.issuerName}. The advance is{" "}
-            <em>not</em> NCUSIF-insured as a deposit at your CU until settled.
+            You will file a presentment for <strong>{money(claim.cashOutCents ?? 0)}</strong>.
+            Do <em>not</em> advance unrestricted cash until SettlementAuth + burn are complete
+            (hold-until-burn). Settlement will be collected from {claim.issuerName}.
           </div>
           {submitError && <ErrorNote message={submitError} />}
           <form onSubmit={filePresentment}>
@@ -339,7 +430,7 @@ export function PresentForeign() {
                 type="submit"
                 disabled={submitting || !cip || !ofac || !ownershipProof || !walkInName.trim()}
               >
-                {submitting ? "Filing…" : "Advance cash & file presentment"}
+                {submitting ? "Filing…" : "File presentment (hold until burn)"}
               </button>
             </div>
           </form>
@@ -349,11 +440,15 @@ export function PresentForeign() {
       {step === "done" && ticket && (
         <div className="wizpanel">
           <h2 className="step">Presentment ticket #{ticket.id}</h2>
-          <div className="note note--ok">
+          <div className={ticket.status === "settled" ? "note note--ok" : "note"}>
             <p>
-              Cash advanced: <strong>{money(ticket.cashOutCents)}</strong> (
-              {ticket.cashOutMode}) to <strong>{ticket.walkInName}</strong>. Status:{" "}
+              Cash-out quote: <strong>{money(ticket.cashOutCents)}</strong> (
+              {ticket.cashOutMode}) for <strong>{ticket.walkInName}</strong>. Status:{" "}
               <em>{ticket.status.replaceAll("_", " ")}</em>.
+            </p>
+            <p>
+              Hold unrestricted cash until <code>burn_accepted</code>. Then run SettlementPayment
+              (mock ACH fills rail/trace when omitted).
             </p>
           </div>
           <table className="terms">
@@ -376,8 +471,84 @@ export function PresentForeign() {
                 <th>Settlement instruction</th>
                 <td>{ticket.settlement}</td>
               </tr>
+              {ticket.settlementAuth && (
+                <tr>
+                  <th>SettlementAuth</th>
+                  <td className="mono">
+                    exp {ticket.settlementAuth.payload.expires_at} · burn_required=
+                    {String(ticket.settlementAuth.payload.burn_required)}
+                  </td>
+                </tr>
+              )}
+              {ticket.burnTxHash && (
+                <tr>
+                  <th>Burn tx</th>
+                  <td className="mono">{shortHash(ticket.burnTxHash)}</td>
+                </tr>
+              )}
+              {ticket.settlementPayment && (
+                <tr>
+                  <th>Payment</th>
+                  <td>
+                    {ticket.settlementPayment.rail} · {ticket.settlementPayment.traceId}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
+
+          <h3>Settlement network steps (issuer API)</h3>
+          <div className="wizactions" style={{ flexWrap: "wrap", gap: "0.5rem" }}>
+            <button
+              className="button"
+              type="button"
+              disabled={settleBusy || ticket.status !== "pending_burn"}
+              onClick={() => void runAuthorize()}
+            >
+              1. Issue SettlementAuth
+            </button>
+            <button
+              className="button"
+              type="button"
+              disabled={settleBusy || ticket.status !== "burn_submitted"}
+              onClick={() => void runAcceptBurn()}
+            >
+              3. Accept burn
+            </button>
+            <button
+              className="button"
+              type="button"
+              disabled={settleBusy || ticket.status !== "burn_accepted"}
+              onClick={() => void runSettlement()}
+            >
+              4. SettlementPayment (mock ACH)
+            </button>
+          </div>
+          {(ticket.status === "authorized" || ticket.status === "pending_burn") && (
+            <form onSubmit={runBurnEvidence} className="formgrid" style={{ marginTop: "1rem" }}>
+              <label>
+                Burn tx hash (64 hex)
+                <input
+                  className="input mono"
+                  value={burnTxHash}
+                  onChange={(e) => setBurnTxHash(e.currentTarget.value)}
+                  placeholder={"a".repeat(16) + "…"}
+                  pattern="[0-9a-fA-F]{64}"
+                  required
+                />
+              </label>
+              <button
+                className="button"
+                type="submit"
+                disabled={settleBusy || ticket.status !== "authorized"}
+              >
+                2. Submit BurnEvidence
+              </button>
+            </form>
+          )}
+          {settleError && <ErrorNote message={settleError} />}
+          {settleNote && <div className="note note--ok">{settleNote}</div>}
+
           <h3>Next steps for the desk</h3>
           <ol className="disclosures" style={{ listStyle: "decimal" }}>
             {ticket.nextSteps.map((s, i) => (

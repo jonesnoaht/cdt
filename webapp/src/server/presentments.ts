@@ -31,6 +31,8 @@ import {
   type BurnValidateMode,
   type BurnValidateResult,
 } from "./burn-validate.js";
+import type { SettlementRail } from "./settlement-rail.js";
+import { MockAchRail } from "./settlement-rail.js";
 
 export interface PresentmentStoreOptions {
   pool?: pg.Pool;
@@ -43,7 +45,10 @@ export interface PresentmentStoreOptions {
     policyId?: string;
     fetchImpl?: typeof fetch;
   };
+  /** Settlement payment rail (default MockAchRail). */
+  settlementRail?: SettlementRail;
 }
+
 function toAuthDto(auth: SignedSettlementAuth): SignedSettlementAuthDto {
   return {
     payload: auth.payload,
@@ -52,6 +57,7 @@ function toAuthDto(auth: SignedSettlementAuth): SignedSettlementAuthDto {
     publicKeySpkiBase64: auth.publicKeySpkiBase64,
   };
 }
+
 const ISSUER_NAME = "CampusUSA Credit Union";
 const PRESENTING_DEFAULT = "Gulfside Credit Union";
 
@@ -206,17 +212,20 @@ export class PresentmentStore {
   private readonly pool?: pg.Pool;
   private readonly signer: SettlementSigner;
   private readonly burnValidation: PresentmentStoreOptions["burnValidation"];
+  private readonly settlementRail: SettlementRail;
 
   constructor(poolOrOpts?: pg.Pool | PresentmentStoreOptions, signer?: SettlementSigner) {
     if (poolOrOpts && typeof (poolOrOpts as pg.Pool).query === "function") {
       this.pool = poolOrOpts as pg.Pool;
       this.signer = signer ?? new SettlementSigner();
       this.burnValidation = undefined;
+      this.settlementRail = new MockAchRail();
     } else {
       const opts = (poolOrOpts as PresentmentStoreOptions | undefined) ?? {};
       this.pool = opts.pool;
       this.signer = opts.signer ?? signer ?? new SettlementSigner();
       this.burnValidation = opts.burnValidation;
+      this.settlementRail = opts.settlementRail ?? new MockAchRail();
     }
   }
   /** Probe once whether the presentments table exists. */
@@ -535,7 +544,7 @@ export class PresentmentStore {
   }
   async recordSettlementPayment(
     id: number,
-    payment: { amountCents: number; rail: string; traceId: string; paidAt?: string },
+    payment: { amountCents: number; rail?: string; traceId?: string; paidAt?: string },
     nowMs: number,
   ): Promise<PresentmentDto | { error: string; status: number }> {
     const p = await this.get(id);
@@ -555,18 +564,44 @@ export class PresentmentStore {
         status: 422,
       };
     }
+
+    // If client supplies rail+traceId, record as-is (manual/external rail).
+    // Otherwise invoke the configured SettlementRail (mock ACH by default).
+    let rail = payment.rail;
+    let traceId = payment.traceId;
+    let paidAt = payment.paidAt;
+    if (!rail || !traceId) {
+      const railResult = await this.settlementRail.pay(
+        {
+          presentmentId: id,
+          amountCents: payment.amountCents,
+          currency: "USD",
+          beneficiaryRef: p.presentingCuName,
+          originatorRef: p.issuerName,
+          depositId: p.depositId ?? String(p.transactionId),
+          memo: `CDT settlement presentment ${id}`,
+        },
+        nowMs,
+      );
+      if (!railResult.ok) {
+        return { error: railResult.reason, status: 422 };
+      }
+      rail = railResult.rail;
+      traceId = railResult.traceId;
+      paidAt = railResult.paidAt;
+    }
+
     return this.update(id, {
       status: "settled",
       settlementPayment: {
         amountCents: payment.amountCents,
-        rail: payment.rail,
-        traceId: payment.traceId,
-        paidAt: payment.paidAt ?? new Date(nowMs).toISOString(),
+        rail,
+        traceId,
+        paidAt: paidAt ?? new Date(nowMs).toISOString(),
       },
       nextSteps: ["Settled. Terminal state."],
     });
   }
-
   private async update(
     id: number,
     patch: Partial<PresentmentDto>,
