@@ -19,8 +19,8 @@
 //      prepare succeeds and the links materialize.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, mkdirSync, readdirSync, statSync, symlinkSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -107,6 +107,7 @@ const deps = [
 
 for (const dep of deps) {
   const built = join(dep.dir, "dist", "index.js");
+  const toolchain = join(dep.dir, "node_modules", "typescript", "lib", "tsc.js");
   const sourcesMtime = Math.max(
     newestMtime(join(dep.dir, "src")),
     newestMtime(join(dep.dir, "package.json")),
@@ -114,7 +115,7 @@ for (const dep of deps) {
     newestMtime(join(dep.dir, "tsconfig.build.json")),
   );
   const isStale = existsSync(built) && newestMtime(built) < sourcesMtime;
-  if (existsSync(built) && !isStale) {
+  if (existsSync(built) && !isStale && existsSync(toolchain)) {
     console.log(`[build-deps] ${dep.name} already built (${built})`);
     continue;
   }
@@ -122,17 +123,14 @@ for (const dep of deps) {
   console.log(
     `[build-deps] ${isStale ? "rebuilding stale" : "building"} ${dep.name} in ${dep.dir} ...`,
   );
-  if (!existsSync(join(dep.dir, "node_modules"))) {
-    // `npm ci` installs the dependency's toolchain and runs its `prepare`
-    // build as a side effect.
-    if (!npm(["ci", "--no-audit", "--no-fund"], dep.dir)) {
+  // Always reinstall when toolchain is missing (partial/failed prior install).
+  if (!existsSync(toolchain)) {
+    if (!npm(["ci", "--include=dev", "--no-audit", "--no-fund"], dep.dir)) {
       console.error(`[build-deps] npm ci failed for ${dep.name}`);
       process.exit(1);
     }
   }
   if (!existsSync(built) || isStale) {
-    // Reached when the toolchain was already installed (stale rebuild), or
-    // when npm ci skipped `prepare` (e.g. a user-level ignore-scripts).
     if (!npm(["run", "build"], dep.dir) || !existsSync(built)) {
       console.error(`[build-deps] build failed for ${dep.name}`);
       process.exit(1);
@@ -142,9 +140,8 @@ for (const dep of deps) {
 }
 
 // Materialize the optional file: links if npm dropped them during a cold
-// `npm ci` (see header comment). With the dependencies built, a second
-// `npm ci` installs the links deterministically from the committed lockfile
-// (unlike `npm install`, it can never rewrite package-lock.json).
+// `npm ci` (see header comment). Prefer a second `npm ci` so the lockfile is
+// honored; if npm still omits optional links, fall back to explicit symlinks.
 const missingLinks = deps.filter(
   (dep) => !existsSync(join(demoDir, "node_modules", ...dep.name.split("/"))),
 );
@@ -152,13 +149,26 @@ if (missingLinks.length > 0) {
   console.log(
     `[build-deps] linking ${missingLinks.map((d) => d.name).join(", ")} into the demo ...`,
   );
-  if (!npm(["ci", "--no-audit", "--no-fund"], demoDir)) {
-    console.error("[build-deps] npm ci failed while linking the local deps");
-    process.exit(1);
+  if (!npm(["ci", "--include=dev", "--no-audit", "--no-fund"], demoDir)) {
+    console.warn(
+      "[build-deps] npm ci failed while linking; will try direct symlinks",
+    );
   }
   for (const dep of missingLinks) {
-    if (!existsSync(join(demoDir, "node_modules", ...dep.name.split("/")))) {
-      console.error(`[build-deps] ${dep.name} is still missing after npm ci`);
+    const linkPath = join(demoDir, "node_modules", ...dep.name.split("/"));
+    if (existsSync(linkPath)) continue;
+    const parent = dirname(linkPath);
+    mkdirSync(parent, { recursive: true });
+    const target = relative(parent, dep.dir);
+    console.log(`[build-deps] symlink ${linkPath} -> ${target}`);
+    try {
+      symlinkSync(target, linkPath, "dir");
+    } catch (err) {
+      console.error(`[build-deps] failed to symlink ${dep.name}: ${err}`);
+      process.exit(1);
+    }
+    if (!existsSync(linkPath)) {
+      console.error(`[build-deps] ${dep.name} is still missing after symlink`);
       process.exit(1);
     }
   }
