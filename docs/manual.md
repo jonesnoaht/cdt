@@ -184,15 +184,22 @@ Opt-in **payment-oracle check** before accepting CDT as consideration. Does **no
 
 Contract: [payment-check-contract.md](./payment-check-contract.md).
 
-### 5.4 Mobile wallet sign (`#/sign`)
+### 5.4 Mobile wallet sign (`#/sign`) — **Lace CIP-30**
 
 For redeem/burn txs too large for a QR of raw CBOR:
 
-1. Desk: `POST /api/sign-requests` with unsigned `cborHex` → claim URL + QR
-2. Phone opens claim page (public GET)
-3. Wallet signs; lab: paste `signedCborHex` / `witnessCborHex` back via complete
+1. Desk: `POST /api/sign-requests` (or `POST /api/presentments/:id/sign-burn`) with unsigned `cborHex` → claim URL + QR  
+2. Open claim page in a browser where **Lace** is installed ([lace.io](https://www.lace.io/))  
+3. Click **Connect Lace & sign** — uses CIP-30 `window.cardano.lace.enable()` → `signTx(cbor, partialSign=true)`  
+4. Witness set is posted back via `POST /api/sign-requests/:id/complete`  
 
-QR encodes the **claim URL**, not Bluetooth. Wallet deep-link catalog on the response (`walletLinks`).
+| Path | Notes |
+| --- | --- |
+| **Preferred** | Lace extension (Chrome/Brave) or Lace mobile + in-app browser |
+| **Also supported** | Other CIP-30 wallets (Eternl, Nami, …) via wallet dropdown |
+| **Lab fallback** | Paste witness/signed CBOR if no extension |
+
+QR still encodes only the **claim URL** (not multi-KB CBOR). Bluetooth is not used.
 
 ---
 
