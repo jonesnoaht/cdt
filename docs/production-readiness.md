@@ -62,6 +62,7 @@ export IDENTUS_MODE=mock                 # until Identus HTTP agent is wired
 # ALLOW_EPHEMERAL_ORACLE_KEY=1
 # BURN_VALIDATE_MODE=off
 ```
+
 Terminate TLS at a reverse proxy; never expose Postgres or the API on a public interface without mTLS/JWT between institutions.
 
 ---
