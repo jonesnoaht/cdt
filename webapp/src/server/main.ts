@@ -38,6 +38,8 @@ const app = createApp({
   burnValidateMode: config.burnValidateMode,
   cdtPolicyId: config.cdtPolicyId,
   settlementRail: settlementRailFromEnv(),
+  issuerApiKey: config.issuerApiKey,
+  correspondentApiKey: config.correspondentApiKey,
 });
 
 // Serve the built UI when it exists (vite build → dist/ui), so the API

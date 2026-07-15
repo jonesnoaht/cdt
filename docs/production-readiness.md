@@ -47,6 +47,10 @@ export PGPASSWORD='…'          # no default in production
 export ORACLE_SIGNING_KEY_PEM='…'
 export PAYMENT_ORACLE_SIGNING_KEY_PEM='…'
 export SETTLEMENT_SIGNING_KEY_PEM='…'   # optional; else ephemeral lab key
+export CDT_ISSUER_API_KEY='…'          # authorize / accept-burn / settlement-payment
+export CDT_CORRESPONDENT_API_KEY='…'   # presentments / burn-evidence
+# or single shared key:
+# export CDT_API_KEY='…'
 export HOST=127.0.0.1
 export CDT_VC_MODE=credentials
 export CDT_TRUSTED_ROOT_DID='did:…'
@@ -77,7 +81,7 @@ Terminate TLS at a reverse proxy; never expose Postgres or the API on a public i
 | **On-chain burn validation** | Prove burn tx burns deposit CDT | **Done (Koios):** `BURN_VALIDATE_MODE=strict` + `CHAIN_PROVIDER=koios-preview`; optional `CDT_POLICY_ID` |
 | **ACH/FedNow integration** | SettlementPayment is an audit record | **Mock rail:** `SETTLEMENT_RAIL=mock\|log\|none` (`settlement-rail.ts`) |
 | **Oracle VC path** | Fail-closed / accept-all | **credentials mode** enrolls bank DIDs via `@cdt/credentials` (`BankCredentialDirectory`) |
-| **mTLS / institutional JWT** | Spec inter-CU auth | Open |
+| **mTLS / institutional JWT** | Spec inter-CU auth | **Dual API keys:** `CDT_ISSUER_API_KEY` + `CDT_CORRESPONDENT_API_KEY` (role-mapped settlement routes); single `CDT_API_KEY` still works for both |
 | **HSM / dual control** | Mint oracle and settlement keys | Open |
 | **Professional SC audit** | Aiken validators + economic model | Open |
 | **One-shot on-chain deposit registry** | Global uniqueness | Open |

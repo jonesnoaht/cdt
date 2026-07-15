@@ -33,6 +33,10 @@ export interface ServerConfig {
   burnValidateMode: "off" | "soft" | "strict";
   /** Optional CDT policy id for burn asset matching. */
   cdtPolicyId: string | undefined;
+  /** Issuer institutional API key (optional dual-key mode). */
+  issuerApiKey: string | undefined;
+  /** Correspondent institutional API key (optional dual-key mode). */
+  correspondentApiKey: string | undefined;
 }
 
 /**
@@ -71,5 +75,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
       return env.CHAIN_PROVIDER === "koios-preview" ? "strict" : "off";
     })(),
     cdtPolicyId: env.CDT_POLICY_ID || undefined,
+    issuerApiKey: env.CDT_ISSUER_API_KEY || undefined,
+    correspondentApiKey: env.CDT_CORRESPONDENT_API_KEY || undefined,
   };
 }

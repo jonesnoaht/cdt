@@ -35,15 +35,29 @@ describe("seed", () => {
     expect(again.cdDepositTxIds).toHaveLength(3);
     seeded = again;
   });
+
+  it("attests all demo CD deposits so desks have redeemable claims", async () => {
+    const { rows } = await pool.query(
+      `SELECT count(*)::int AS n FROM attestations WHERE transaction_id = ANY($1::int[])`,
+      [seeded.cdDepositTxIds],
+    );
+    expect(rows[0].n).toBe(3);
+    const unattested = await listUnattestedCdDeposits(pool);
+    expect(unattested).toHaveLength(0);
+  });
 });
 
 describe("listUnattestedCdDeposits", () => {
-  it("returns exactly the seeded cd_funding deposits with account + product joined", async () => {
+  it("returns newly booked CD-funding deposits with account + product joined", async () => {
+    const tx = await deposit(pool, {
+      accountId: seeded.cdFundingIds[0]!,
+      amountCents: 500_00,
+      productId: seeded.productIds[0]!,
+      memo: "test unattested CD",
+    });
     const rows = await listUnattestedCdDeposits(pool);
-    expect(rows).toHaveLength(3);
-    expect(rows.map((r) => r.transactionId)).toEqual(seeded.cdDepositTxIds);
-
-    const first = rows[0]!;
+    expect(rows.map((r) => r.transactionId)).toContain(tx.id);
+    const first = rows.find((r) => r.transactionId === tx.id)!;
     expect(first.amountCents).toBe(500_00);
     expect(first.account.memberName).toBe(SEED_MEMBERS[0].name);
     expect(first.account.walletAddress).toBe(SEED_MEMBERS[0].wallet);
@@ -63,44 +77,54 @@ describe("listUnattestedCdDeposits", () => {
     });
     const rows = await listUnattestedCdDeposits(pool);
     expect(rows.map((r) => r.transactionId)).not.toContain(tx.id);
-    expect(rows).toHaveLength(3);
   });
 });
 
 describe("recordAttestation", () => {
   it("flips attested=true and removes the row from the unattested list", async () => {
-    const txId = seeded.cdDepositTxIds[0]!;
-    const attestation = await recordAttestation(pool, txId, "dep-0001", {
-      schema: "cdt/attestation/v1",
-      amountCents: 500_00,
+    const booked = await deposit(pool, {
+      accountId: seeded.cdFundingIds[1]!,
+      amountCents: 2_500_00,
+      productId: seeded.productIds[1]!,
+      memo: "attestation unit test",
     });
-    expect(attestation.transactionId).toBe(txId);
-    expect(attestation.depositId).toBe("dep-0001");
+    const attestation = await recordAttestation(pool, booked.id, "dep-test-attest-1", {
+      schema: "cdt/attestation/v1",
+      amountCents: 2_500_00,
+    });
+    expect(attestation.transactionId).toBe(booked.id);
+    expect(attestation.depositId).toBe("dep-test-attest-1");
     expect(attestation.signedAt).toBeInstanceOf(Date);
 
     const { rows } = await pool.query(
       "SELECT attested FROM transactions WHERE id = $1",
-      [txId],
+      [booked.id],
     );
     expect(rows[0].attested).toBe(true);
 
     const unattested = await listUnattestedCdDeposits(pool);
-    expect(unattested.map((r) => r.transactionId)).not.toContain(txId);
+    expect(unattested.map((r) => r.transactionId)).not.toContain(booked.id);
   });
 
   it("rejects a second attestation for the same transaction (UNIQUE)", async () => {
-    const txId = seeded.cdDepositTxIds[0]!;
+    const booked = await deposit(pool, {
+      accountId: seeded.cdFundingIds[2]!,
+      amountCents: 10_000_00,
+      productId: seeded.productIds[2]!,
+      memo: "unique attestation test",
+    });
+    await recordAttestation(pool, booked.id, "dep-test-unique", { first: true });
     await expect(
-      recordAttestation(pool, txId, "dep-0001-dupe", { dupe: true }),
+      recordAttestation(pool, booked.id, "dep-test-unique-dupe", { dupe: true }),
     ).rejects.toThrow(/unique|duplicate key/i);
 
     // Original attestation must be untouched.
     const { rows } = await pool.query(
       "SELECT deposit_id FROM attestations WHERE transaction_id = $1",
-      [txId],
+      [booked.id],
     );
     expect(rows).toHaveLength(1);
-    expect(rows[0].deposit_id).toBe("dep-0001");
+    expect(rows[0].deposit_id).toBe("dep-test-unique");
   });
 
   it("rolls back cleanly when the transaction does not exist", async () => {

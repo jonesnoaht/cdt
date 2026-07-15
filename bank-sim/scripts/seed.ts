@@ -12,7 +12,10 @@ try {
   console.log(
     `seeded 3 checking deposits and ${result.cdDepositTxIds.length} CD-funding deposits`,
   );
-  console.log("seed complete");
+  console.log(
+    `seeded ${result.cdDepositTxIds.length} demo attestations (claim refs: ${result.cdDepositTxIds.join(", ")})`,
+  );
+  console.log("seed complete — desks: #/present claim refs above; #/pay same");
 } finally {
   await pool.end();
 }
