@@ -43,6 +43,23 @@ CREATE TABLE IF NOT EXISTS attestations (
   id SERIAL PRIMARY KEY,
   transaction_id INT UNIQUE REFERENCES transactions NOT NULL,
   deposit_id TEXT NOT NULL,
+  -- Bank account id bound into the oracle attestation (string form of accounts.id).
+  account_id TEXT NOT NULL DEFAULT '',
+  -- Hex SHA-256 of the canonical attestation payload (vault datum attestation_hash).
+  attestation_hash TEXT NOT NULL DEFAULT '',
   payload JSONB NOT NULL,
   signed_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- One deposit_id may never receive two attestations (issuance uniqueness).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_attestations_deposit_id_unique
+  ON attestations (deposit_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_attestations_hash_unique
+  ON attestations (attestation_hash)
+  WHERE attestation_hash <> '';
+
+-- Upgrade path for volumes created before account-bound attestations.
+ALTER TABLE attestations ADD COLUMN IF NOT EXISTS account_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE attestations ADD COLUMN IF NOT EXISTS attestation_hash TEXT NOT NULL DEFAULT '';
+

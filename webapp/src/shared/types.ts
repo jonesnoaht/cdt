@@ -178,6 +178,7 @@ export interface PresentmentRequest {
 }
 
 export type PresentmentStatus =
+  | "pending_burn"
   | "cash_advanced_pending_settlement"
   | "settled"
   | "rejected";
@@ -200,6 +201,8 @@ export interface PresentmentDto {
   holderWallet: string;
   settlement: string;
   nextSteps: string[];
+  /** Detailed burn-before-cash instructions (desk). */
+  settlementInstructions?: string;
 }
 
 /**
@@ -226,8 +229,8 @@ export interface PaymentVerifyRequest {
   challenge: string;
   /** Optional invoice amount (cents); must not exceed principal if set. */
   amountCents?: number;
-  /** Optional payer wallet; must match attested owner when set. */
-  payerWallet?: string;
+  /** Required: payer wallet must match attested owner (possession binding). */
+  payerWallet: string;
 }
 
 export interface PaymentCheckPayload {

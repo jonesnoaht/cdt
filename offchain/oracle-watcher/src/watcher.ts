@@ -173,7 +173,9 @@ export class OracleWatcher {
 
     const payload = buildAttestationPayload({
       transactionId: txId,
+      accountId: deposit.accountId,
       walletAddress: deposit.walletAddress,
+      ownerDid: deposit.did,
       amountCents: deposit.amountCents,
       rateBps: deposit.product.rateBps,
       penaltyBps: deposit.product.penaltyBps,
@@ -197,11 +199,17 @@ export class OracleWatcher {
         return null; // finally rolls back
       }
       const insertResult = await client.query(
-        `INSERT INTO attestations (transaction_id, deposit_id, payload)
-         VALUES ($1, $2, $3)
+        `INSERT INTO attestations (transaction_id, deposit_id, account_id, payload, attestation_hash)
+         VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (transaction_id) DO NOTHING
          RETURNING id`,
-        [txId, payload.deposit_id, JSON.stringify(signed)],
+        [
+          txId,
+          payload.deposit_id,
+          payload.account_id,
+          JSON.stringify(signed),
+          signed.attestation_hash_hex,
+        ],
       );
       inserted = insertResult.rowCount === 1;
       if (!inserted) {

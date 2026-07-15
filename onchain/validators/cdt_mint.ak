@@ -29,6 +29,7 @@ use aiken/collection/dict
 use aiken/collection/list
 use aiken/crypto.{ScriptHash, VerificationKeyHash}
 use aiken/interval
+use aiken/primitive/bytearray
 use cardano/address.{Script}
 use cardano/assets.{PolicyId}
 use cardano/transaction.{InlineDatum, Output, Transaction}
@@ -69,7 +70,7 @@ validator cdt_mint(oracle_vkh: VerificationKeyHash, vault_hash: ScriptHash) {
           },
         )
         and {
-          // The oracle attestation.
+          // The oracle attestation (co-sign of this transaction).
           list.has(self.extra_signatories, oracle_vkh),
           // Exactly +1 of the deposit's asset name, and nothing else under
           // this policy.
@@ -77,6 +78,11 @@ validator cdt_mint(oracle_vkh: VerificationKeyHash, vault_hash: ScriptHash) {
           // Sane CD terms.
           datum.maturity > datum.start,
           datum.principal > 0,
+          // Issuance linkage: every mint must name a bank account and carry
+          // a 32-byte attestation hash binding that account to this deposit.
+          bytearray.length(datum.deposit_id) > 0,
+          bytearray.length(datum.account_id) > 0,
+          bytearray.length(datum.attestation_hash) == 32,
           locks_cd_in_vault,
         }
       }

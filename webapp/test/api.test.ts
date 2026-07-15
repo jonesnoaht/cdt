@@ -52,7 +52,7 @@ async function postJson<T>(path: string, body: unknown): Promise<{ status: numbe
 
 beforeAll(async () => {
   pool = new pg.Pool(TEST_DB);
-  app = createApp({ pool, now: () => NOW_MS });
+  app = createApp({ pool, now: () => NOW_MS, allowOpenApi: true, apiKey: null });
 });
 
 afterAll(async () => {
@@ -293,7 +293,7 @@ describe("correspondent presentment", () => {
 
   it("files a presentment after CIP checks and rejects double cash-out", async () => {
     // Fresh app instance so presentment store is empty
-    const localApp = createApp({ pool, now: () => NOW_MS });
+    const localApp = createApp({ pool, now: () => NOW_MS, allowOpenApi: true, apiKey: null });
     const post = async (path: string, body: unknown) => {
       const res = await localApp.request(path, {
         method: "POST",
@@ -323,7 +323,7 @@ describe("correspondent presentment", () => {
     expect(ok.status).toBe(201);
     expect(ok.body).toMatchObject({
       walkInName: "Ada Lovelace",
-      status: "cash_advanced_pending_settlement",
+      status: "pending_burn",
       cashOutMode: "early",
     });
     expect((ok.body as { cashOutCents: number }).cashOutCents).toBeGreaterThan(0);
@@ -365,7 +365,13 @@ describe("payment terminal oracle check (freely spendable)", () => {
 
   it("issues a challenge, verifies an attested claim, and validates the signature", async () => {
     const oracle = new (await import("../src/server/payment-oracle.js")).PaymentOracle();
-    const localApp = createApp({ pool, now: () => NOW_MS, paymentOracle: oracle });
+    const localApp = createApp({
+      pool,
+      now: () => NOW_MS,
+      paymentOracle: oracle,
+      allowOpenApi: true,
+      apiKey: null,
+    });
 
     const chRes = await localApp.request("/api/payment/challenge", { method: "POST" });
     expect(chRes.status).toBe(200);
@@ -378,6 +384,7 @@ describe("payment terminal oracle check (freely spendable)", () => {
         claimRef: String(fx.cds.pendingTxId),
         merchantId: "m1",
         challenge: ch.challenge,
+        payerWallet: "addr_test1qada000000000000000000000000000000000000000000000",
       }),
     });
     // challenge was consumed even on failure path if verify ran... actually pending returns after challenge consume
@@ -396,6 +403,7 @@ describe("payment terminal oracle check (freely spendable)", () => {
         merchantId: "coffee-shop-42",
         challenge: ch2.challenge,
         amountCents: 100_00,
+        payerWallet: "addr_test1qada000000000000000000000000000000000000000000000",
       }),
     });
     expect(okRes.status).toBe(200);
@@ -423,6 +431,7 @@ describe("payment terminal oracle check (freely spendable)", () => {
         claimRef: String(fx.cds.activeTxId),
         merchantId: "coffee-shop-42",
         challenge: ch2.challenge,
+        payerWallet: "addr_test1qada000000000000000000000000000000000000000000000",
       }),
     });
     const replayBody = (await replay.json()) as { ok: boolean };
@@ -430,7 +439,7 @@ describe("payment terminal oracle check (freely spendable)", () => {
   });
 
   it("rejects payer wallet mismatch and over-principal invoices", async () => {
-    const localApp = createApp({ pool, now: () => NOW_MS });
+    const localApp = createApp({ pool, now: () => NOW_MS, allowOpenApi: true, apiKey: null });
     const challenge = async () => {
       const r = await localApp.request("/api/payment/challenge", { method: "POST" });
       return ((await r.json()) as { challenge: string }).challenge;
@@ -456,6 +465,7 @@ describe("payment terminal oracle check (freely spendable)", () => {
         merchantId: "m",
         challenge: await challenge(),
         amountCents: 999_999_00,
+        payerWallet: "addr_test1qada000000000000000000000000000000000000000000000",
       }),
     });
     expect(((await over.json()) as { reason: string }).reason).toMatch(/exceeds certificate principal/i);
@@ -570,6 +580,8 @@ describe("GET /api/cds/:depositId/chain", () => {
       chainProvider: "koios-preview",
       koiosBaseUrl: "https://koios.test/api/v1",
       fetchImpl,
+      allowOpenApi: true,
+      apiKey: null,
     });
     const res = await chainApp.request(`/api/cds/${fx.cds.activeTxId}/chain`);
     const body = (await res.json()) as { available: boolean; txHash: string; tx: unknown };

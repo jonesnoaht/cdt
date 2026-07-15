@@ -65,8 +65,8 @@ export function PaymentTerminal() {
         claimRef: claimRef.trim(),
         merchantId: merchantId.trim(),
         challenge: ch.challenge,
+        payerWallet: payerWallet.trim(),
         ...(amountCents !== undefined ? { amountCents } : {}),
-        ...(payerWallet.trim() ? { payerWallet: payerWallet.trim() } : {}),
       });
       setResult(verified);
       if (verified.ok) {

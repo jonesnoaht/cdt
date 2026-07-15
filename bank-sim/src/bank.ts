@@ -175,11 +175,23 @@ export async function recordAttestation(
     // JSONB; undefined would stringify to undefined and bind as SQL NULL,
     // violating NOT NULL, so normalize it to JSON null.
     const { rows } = await client.query(
-      `INSERT INTO attestations (transaction_id, deposit_id, payload)
-       VALUES ($1, $2, $3)
+      `INSERT INTO attestations (transaction_id, deposit_id, account_id, attestation_hash, payload)
+       SELECT $1, $2, t.account_id::text, COALESCE($4, ''), $3
+         FROM transactions t
+        WHERE t.id = $1
        RETURNING *`,
-      [transactionId, depositId, JSON.stringify(payload ?? null)],
+      [
+        transactionId,
+        depositId,
+        JSON.stringify(payload ?? null),
+        typeof payload === "object" && payload && "attestation_hash_hex" in (payload as object)
+          ? String((payload as { attestation_hash_hex?: string }).attestation_hash_hex ?? "")
+          : "",
+      ],
     );
+    if (rows.length !== 1) {
+      throw new Error(`transaction ${transactionId} does not exist`);
+    }
     // A nonexistent transactionId is rejected by the FK on the INSERT above,
     // so the UPDATE is guaranteed to match exactly one row.
     await client.query(

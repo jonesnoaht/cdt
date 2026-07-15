@@ -41,19 +41,19 @@ validator cd_vault {
     self: Transaction,
   ) {
     expect Some(datum) = datum_opt
-    let  
-        CDDatum {
-          owner,
-          issuer,
-          deposit_id,
-          principal,
-          rate_bps,
-          start,
-          maturity,
-          penalty_bps,
-          cdt_policy,
-        }
-      = datum
+    let CDDatum {
+      owner,
+      issuer,
+      deposit_id,
+      principal,
+      rate_bps,
+      start,
+      maturity,
+      penalty_bps,
+      cdt_policy,
+      account_id: _,
+      attestation_hash: _,
+    } = datum
 
     // Common requirements for both paths.
     let signed_by_owner = list.has(self.extra_signatories, owner)

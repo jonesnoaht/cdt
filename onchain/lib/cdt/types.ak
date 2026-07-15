@@ -4,6 +4,12 @@
 //// single source of truth for the CD terms. The minting policy verifies it
 //// at mint time (as the oracle-attested payload of `MintCD`) and the vault
 //// enforces it at spend time.
+////
+//// Security (issuance linkage): every mint MUST carry a non-empty
+//// `account_id` (bank-core account) and a 32-byte `attestation_hash`
+//// (hash of the oracle's signed off-chain attestation that binds
+//// deposit_id + account_id + owner + economic terms). Verifiers recompute
+//// the hash from the published attestation and match it to the vault datum.
 
 use aiken/crypto.{VerificationKeyHash}
 use cardano/assets.{PolicyId}
@@ -28,6 +34,12 @@ pub type CDDatum {
   penalty_bps: Int,
   /// Policy id of the CDT minting policy that minted this CD's token.
   cdt_policy: PolicyId,
+  /// Bank-core account id that funded this CD (UTF-8 decimal), bound by the
+  /// oracle attestation. Non-empty at mint.
+  account_id: ByteArray,
+  /// SHA-256 of the canonical oracle attestation payload (32 bytes). Ties
+  /// this vault UTxO to one verified deposit+account attestation.
+  attestation_hash: ByteArray,
 }
 
 /// How the vault UTxO may be spent.
