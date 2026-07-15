@@ -128,6 +128,22 @@ export function signAttestation(
   };
 }
 
+/** Sign using a pluggable message signer (PEM / remote / HSM sidecar). */
+export async function signAttestationWith(
+  payload: AttestationPayload,
+  signMessage: (message: string) => Promise<string> | string,
+  oraclePublicKeyB64: string,
+): Promise<SignedAttestation> {
+  const signature = await signMessage(canonicalize(payload));
+  return {
+    payload,
+    signature,
+    algorithm: 'Ed25519',
+    oracle_public_key: oraclePublicKeyB64,
+    attestation_hash_hex: attestationHashHex(payload),
+  };
+}
+
 /**
  * Verify a signed attestation against an oracle public key (base64 SPKI or
  * KeyObject).

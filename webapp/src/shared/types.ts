@@ -234,6 +234,9 @@ export interface SignedSettlementAuthDto {
   signature: string;
   algorithm: "Ed25519";
   publicKeySpkiBase64: string;
+  /** Dual-control cosignature (when SETTLEMENT_DUAL_CONTROL=1). */
+  secondarySignature?: string;
+  secondaryPublicKeySpkiBase64?: string;
 }
 
 /**

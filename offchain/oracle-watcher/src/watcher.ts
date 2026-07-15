@@ -3,9 +3,11 @@ import type { Pool } from 'pg';
 import {
   buildAttestationPayload,
   signAttestation,
+  signAttestationWith,
   type SignedAttestation,
 } from './attestation.js';
 import { publicKeyToBase64 } from './keys.js';
+import type { SigningProvider } from './signing-provider.js';
 
 /** A candidate deposit row (transactions JOIN accounts JOIN cd_products). */
 export interface PendingDeposit {
@@ -49,7 +51,13 @@ export interface WatcherLogger {
 
 export interface OracleWatcherOptions {
   pool: Pool;
-  oraclePrivateKey: KeyObject;
+  /**
+   * Local Ed25519 private key (lab / PEM path).
+   * Prefer `signingProvider` for remote/HSM sidecars.
+   */
+  oraclePrivateKey?: KeyObject;
+  /** Pluggable signer (remote HSM sidecar, etc.). Overrides private key when set. */
+  signingProvider?: SigningProvider;
   verifyPresentation: VerifyPresentationHook;
   onAttested?: OnAttestedHook;
   /** poll interval in ms (default 5000) */
@@ -103,7 +111,8 @@ const PENDING_DEPOSITS_SQL = `
  */
 export class OracleWatcher {
   private readonly pool: Pool;
-  private readonly oraclePrivateKey: KeyObject;
+  private readonly oraclePrivateKey: KeyObject | undefined;
+  private readonly signingProvider: SigningProvider | undefined;
   private readonly oraclePublicKeyB64: string;
   private readonly verifyPresentation: VerifyPresentationHook;
   private readonly onAttested: OnAttestedHook | undefined;
@@ -123,8 +132,17 @@ export class OracleWatcher {
 
   constructor(opts: OracleWatcherOptions) {
     this.pool = opts.pool;
-    this.oraclePrivateKey = opts.oraclePrivateKey;
-    this.oraclePublicKeyB64 = publicKeyToBase64(createPublicKey(opts.oraclePrivateKey));
+    this.signingProvider = opts.signingProvider;
+    this.oraclePrivateKey = opts.oraclePrivateKey ?? opts.signingProvider?.privateKeyObject?.();
+    if (opts.signingProvider) {
+      this.oraclePublicKeyB64 = opts.signingProvider.publicKeySpkiBase64();
+    } else if (this.oraclePrivateKey) {
+      this.oraclePublicKeyB64 = publicKeyToBase64(createPublicKey(this.oraclePrivateKey));
+    } else {
+      throw new Error(
+        "OracleWatcher requires oraclePrivateKey or signingProvider with a public key",
+      );
+    }
     this.verifyPresentation = opts.verifyPresentation;
     this.onAttested = opts.onAttested;
     this.pollIntervalMs = opts.pollIntervalMs ?? 5000;
@@ -182,7 +200,19 @@ export class OracleWatcher {
       termMonths: deposit.product.termMonths,
       now: this.now(),
     });
-    const signed = signAttestation(payload, this.oraclePrivateKey, this.oraclePublicKeyB64);
+    let signed: SignedAttestation;
+    if (this.signingProvider) {
+      signed = await signAttestationWith(
+        payload,
+        (m) => this.signingProvider!.signUtf8Message(m),
+        this.oraclePublicKeyB64,
+      );
+    } else if (this.oraclePrivateKey) {
+      const key = this.oraclePrivateKey;
+      signed = signAttestation(payload, key, this.oraclePublicKeyB64);
+    } else {
+      throw new Error("OracleWatcher has no signing material");
+    }
 
     const client = await this.pool.connect();
     let committed = false;

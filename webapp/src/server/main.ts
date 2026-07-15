@@ -5,6 +5,8 @@ import { existsSync } from "node:fs";
 import pg from "pg";
 import { PaymentOracle } from "./payment-oracle.js";
 import { settlementRailFromEnv } from "./settlement-rail.js";
+import { settlementSignerFromEnv } from "./settlement-auth.js";
+import { PresentmentStore } from "./presentments.js";
 import { createApp } from "./app.js";
 import { configFromEnv } from "./config.js";
 const config = configFromEnv();
@@ -28,6 +30,31 @@ if (!config.paymentOracleKeyPem) {
   );
 }
 
+let settlementSigner;
+try {
+  settlementSigner = settlementSignerFromEnv();
+} catch (err) {
+  console.error(`cdt-webapp: settlement signer: ${String(err)}`);
+  process.exit(1);
+}
+if (settlementSigner.dualControlRequired) {
+  console.log(
+    "cdt-webapp: SettlementAuth dual-control cosign ENABLED (secondary key required)",
+  );
+}
+
+const presentmentStore = new PresentmentStore({
+  pool,
+  signer: settlementSigner,
+  burnValidation: {
+    mode: config.burnValidateMode,
+    provider: config.chainProvider,
+    koiosBaseUrl: config.koiosBaseUrl,
+    policyId: config.cdtPolicyId,
+  },
+  settlementRail: settlementRailFromEnv(),
+});
+
 const app = createApp({
   pool,
   chainProvider: config.chainProvider,
@@ -35,6 +62,7 @@ const app = createApp({
   apiKey: config.allowOpenApi && !config.apiKey ? null : config.apiKey,
   allowOpenApi: config.allowOpenApi,
   paymentOracle,
+  presentmentStore,
   burnValidateMode: config.burnValidateMode,
   cdtPolicyId: config.cdtPolicyId,
   settlementRail: settlementRailFromEnv(),
