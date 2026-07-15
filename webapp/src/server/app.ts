@@ -30,6 +30,12 @@ import { DepositRegistry } from "./deposit-registry.js";
 import { PaymentOracle } from "./payment-oracle.js";
 import { SignRequestStore } from "./sign-requests.js";
 import {
+  identityProviderFromEnv,
+  type IdentityProvider,
+  type IdvCheckRequest,
+} from "./identity-provider.js";
+import { listWalletBrands } from "./wallet-deeplinks.js";
+import {
   isPublicPath,
   publicOrAuthed,
   publicOrRoleAuthed,
@@ -133,6 +139,8 @@ export interface AppOptions {
   depositRegistry?: DepositRegistry;
   /** Optional sign-request store (tests inject). */
   signRequestStore?: SignRequestStore;
+  /** Optional CIP/IDV provider (tests inject). */
+  identityProvider?: IdentityProvider;
 }
 
 interface MemberIdentity {
@@ -184,6 +192,15 @@ export function createApp(options: AppOptions): Hono {
   void presentments.init();
   const paymentOracle = options.paymentOracle ?? new PaymentOracle();
   const signRequests = options.signRequestStore ?? new SignRequestStore();
+  const identityProvider =
+    options.identityProvider ??
+    (() => {
+      try {
+        return identityProviderFromEnv();
+      } catch {
+        return identityProviderFromEnv({ CDT_IDV_MODE: "mock" });
+      }
+    })();
   const allowOpenApi = options.allowOpenApi === true;
   const apiKey =
     options.apiKey === null
@@ -239,6 +256,7 @@ export function createApp(options: AppOptions): Hono {
       deepLinkTemplate?: string;
       ttlMs?: number;
       requiredSignerHint?: string;
+      walletBrand?: string;
     };
     try {
       body = (await c.req.json()) as typeof body;
@@ -270,6 +288,7 @@ export function createApp(options: AppOptions): Hono {
         deepLinkTemplate: body.deepLinkTemplate,
         ttlMs: body.ttlMs,
         requiredSignerHint: body.requiredSignerHint,
+        walletBrand: body.walletBrand as import("./wallet-deeplinks.js").WalletBrand | undefined,
       });
       return c.json(dto, 201);
     } catch (err) {
@@ -706,12 +725,44 @@ export function createApp(options: AppOptions): Hono {
     } catch {
       return c.json({ error: "Request body must be JSON." }, 400);
     }
-    const req = (body ?? {}) as PresentmentRequest;
+    const req = (body ?? {}) as PresentmentRequest & {
+      requireIdv?: boolean;
+      cipComplete?: boolean;
+      ofacCleared?: boolean;
+      ownershipVerified?: boolean;
+    };
     if (typeof req.claimRef !== "string" || !req.claimRef.trim()) {
       return c.json({ error: "claimRef is required." }, 400);
     }
     const claim = await lookupClaim(pool, req.claimRef, now());
     if (!claim) return c.json({ error: "No certificate found for that claim reference." }, 404);
+
+    // Optional server-side CIP/OFAC/ownership gate (CDT_IDV_MODE).
+    if (req.requireIdv === true || process.env.CDT_IDV_REQUIRE === "1") {
+      const idv = await identityProvider.check(
+        {
+          kind: "composite",
+          subjectName: req.walkInName ?? claim.holderName,
+          holderDid: claim.holderDid,
+          walletAddress: claim.holderWallet,
+          cipComplete: req.cipComplete === true || req.checks?.cip === true,
+          ofacCleared: req.ofacCleared === true || req.checks?.ofac === true,
+          ownershipVerified:
+            req.ownershipVerified === true || req.checks?.ownershipProof === true,
+          correlationId: req.claimRef,
+        },
+        now(),
+      );
+      if (!idv.ok) {
+        return c.json(
+          {
+            error: "Identity verification failed.",
+            idv,
+          },
+          422,
+        );
+      }
+    }
 
     const result = await presentments.create({ claim, body: req, nowMs: now() });
     if ("error" in result) {
@@ -719,6 +770,32 @@ export function createApp(options: AppOptions): Hono {
     }
     return c.json(result satisfies PresentmentDto, 201);
   });
+
+  /** Run CIP/IDV/OFAC check without creating a presentment. */
+  app.post("/api/idv/check", async (c) => {
+    let body: IdvCheckRequest;
+    try {
+      body = (await c.req.json()) as IdvCheckRequest;
+    } catch {
+      return c.json({ error: "Request body must be JSON." }, 400);
+    }
+    if (!body.subjectName?.trim()) {
+      return c.json({ error: "subjectName is required." }, 400);
+    }
+    const kind = body.kind || "composite";
+    const result = await identityProvider.check({ ...body, kind }, now());
+    return c.json(result, result.ok ? 200 : 422);
+  });
+
+  app.get("/api/idv/provider", (c) =>
+    c.json({
+      name: identityProvider.name,
+      modes: ["mock", "http", "disabled"],
+      env: "CDT_IDV_MODE / CDT_IDV_URL / CDT_IDV_TOKEN / CDT_IDV_REQUIRE",
+    }),
+  );
+
+  app.get("/api/wallets/brands", (c) => c.json({ brands: listWalletBrands() }));
 
   /** Issue SettlementAuth (signed, burn_required, TTL). */
   app.post("/api/presentments/:id/authorize", async (c) => {
