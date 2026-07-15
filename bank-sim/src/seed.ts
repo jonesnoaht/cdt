@@ -67,10 +67,14 @@ export async function seed(
   // presentment tables may not exist on very old volumes; ignore if missing.
   await pool.query(`
     DO $$ BEGIN
-      TRUNCATE presentment_events, presentments, attestations, transactions, accounts, cd_products
+      TRUNCATE presentment_events, presentments, deposit_registry, attestations, transactions, accounts, cd_products
         RESTART IDENTITY CASCADE;
     EXCEPTION WHEN undefined_table THEN
-      TRUNCATE attestations, transactions, accounts, cd_products RESTART IDENTITY CASCADE;
+      BEGIN
+        TRUNCATE attestations, transactions, accounts, cd_products RESTART IDENTITY CASCADE;
+      EXCEPTION WHEN undefined_table THEN
+        NULL;
+      END;
     END $$;
   `);
 
@@ -207,6 +211,17 @@ export async function seed(
       [tx.id, depositId, accountId, hashHex, JSON.stringify(envelope)],
     );
     await pool.query(`UPDATE transactions SET attested = true WHERE id = $1`, [tx.id]);
+    // Best-effort one-shot registry (table may be missing on old volumes).
+    try {
+      await pool.query(
+        `INSERT INTO deposit_registry (deposit_id, account_id, attestation_hash, state)
+         VALUES ($1, $2, $3, 'attested')
+         ON CONFLICT (deposit_id) DO NOTHING`,
+        [depositId, accountId, hashHex],
+      );
+    } catch {
+      /* older schema */
+    }
   }
 
   return { productIds, checkingIds, cdFundingIds, cdDepositTxIds };

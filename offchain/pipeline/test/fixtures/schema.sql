@@ -95,3 +95,18 @@ CREATE TABLE IF NOT EXISTS presentment_events (
 
 CREATE INDEX IF NOT EXISTS idx_presentment_events_presentment
   ON presentment_events (presentment_id, id);
+
+CREATE TABLE IF NOT EXISTS deposit_registry (
+  deposit_id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL DEFAULT '',
+  attestation_hash TEXT NOT NULL DEFAULT '',
+  state TEXT NOT NULL CHECK (state IN ('attested', 'minted', 'burned')),
+  mint_tx_hash TEXT,
+  burn_tx_hash TEXT,
+  presentment_id INT,
+  meta JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE presentments ADD COLUMN IF NOT EXISTS idempotency_key TEXT;

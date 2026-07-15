@@ -85,7 +85,9 @@ Terminate TLS at a reverse proxy; never expose Postgres or the API on a public i
 | **mTLS / institutional JWT** | Spec inter-CU auth | **Dual API keys + HS256 JWT:** `CDT_JWT_SECRET`, `POST /api/auth/token`, Bearer role claims; dual keys still supported |
 | **HSM / dual control** | Mint oracle and settlement keys | Open |
 | **Professional SC audit** | Aiken validators + economic model | Open |
-| **One-shot on-chain deposit registry** | Global uniqueness | Open |
+| **One-shot on-chain deposit registry** | Global uniqueness | **Off-chain pilot:** `deposit_registry` (`attested→minted→burned`) + `GET /api/deposit-registry/:id`; on-chain still open |
+| **Key ceremony / dual control** | Ops process + PEMs | **Done:** `docs/ops/key-ceremony.md` + `npm run keygen:pilot` |
+| **Settlement idempotency** | Safe retries | **Done:** `Idempotency-Key` on settlement-payment |
 | **IDV / CIP systems** | Desk checkboxes remain demo | Open |
 | **OpenAPI** | Machine-readable settlement API | **Done:** `docs/openapi/settlement-v1.yaml`, `GET /api/openapi.json` |
 
