@@ -29,13 +29,14 @@ import {
 import { PaymentOracle } from "./payment-oracle.js";
 import {
   isPublicPath,
-    publicOrAuthed,
-    publicOrRoleAuthed,
-    rateLimit,
-    securityHeaders,
-    settlementRoleForPath,
-    type RoleKeys,
-  } from "./security.js";
+  publicOrAuthed,
+  publicOrRoleAuthed,
+  rateLimit,
+  securityHeaders,
+  settlementRoleForPath,
+  credentialGrantsRole,
+  type RoleKeys,
+} from "./security.js";
 
 /**
  * Largest deposit (in cents) whose lovelace representation still fits in a
@@ -124,6 +125,8 @@ export interface AppOptions {
   issuerApiKey?: string;
   /** Correspondent institutional key (presentment / burn-evidence). */
   correspondentApiKey?: string;
+  /** HS256 secret for institutional JWTs. */
+  jwtSecret?: string;
 }
 
 interface MemberIdentity {
@@ -191,26 +194,107 @@ export function createApp(options: AppOptions): Hono {
     ...(options.correspondentApiKey
       ? { correspondentKey: options.correspondentApiKey }
       : {}),
+    ...(options.jwtSecret ? { jwtSecret: options.jwtSecret } : {}),
   };
   app.use("/api/*", async (c, next) => {
     if (
       allowOpenApi &&
       !apiKey &&
       !options.issuerApiKey &&
-      !options.correspondentApiKey
+      !options.correspondentApiKey &&
+      !options.jwtSecret
     ) {
       return next();
     }
     if (isPublicPath(c.req.path)) {
       return next();
     }
-    if (options.issuerApiKey || options.correspondentApiKey) {
+    if (options.issuerApiKey || options.correspondentApiKey || options.jwtSecret) {
       return publicOrRoleAuthed(roleKeys, c, next, settlementRoleForPath);
     }
     return publicOrAuthed(apiKey, c, next);
   });
 
   app.get("/api/health", (c) => c.json({ ok: true }));
+
+  /**
+   * Mint a short-lived institutional JWT.
+   * Requires a static master/api key (not JWT-for-JWT) + CDT_JWT_SECRET.
+   */
+  app.post("/api/auth/token", async (c) => {
+    if (!options.jwtSecret) {
+      return c.json({ error: "CDT_JWT_SECRET not configured." }, 503);
+    }
+    const presented =
+      c.req.header("x-api-key") ??
+      c.req.header("authorization")?.replace(/^Bearer\s+/i, "");
+    // Only static keys can mint JWTs (not an existing JWT).
+    const mintKeys: RoleKeys = {
+      ...(apiKey ? { apiKey } : {}),
+      ...(options.issuerApiKey ? { issuerKey: options.issuerApiKey } : {}),
+      ...(options.correspondentApiKey
+        ? { correspondentKey: options.correspondentApiKey }
+        : {}),
+    };
+    if (!mintKeys.apiKey && !mintKeys.issuerKey && !mintKeys.correspondentKey) {
+      return c.json(
+        { error: "Static API key required to mint JWTs (set CDT_API_KEY or dual keys)." },
+        503,
+      );
+    }
+    // Caller must present a valid static key for the requested role (or legacy any).
+    let body: { role?: string; sub?: string; ttlSec?: number };
+    try {
+      body = (await c.req.json()) as typeof body;
+    } catch {
+      return c.json({ error: "Request body must be JSON." }, 400);
+    }
+    if (body.role !== "issuer" && body.role !== "correspondent") {
+      return c.json({ error: "role must be 'issuer' or 'correspondent'." }, 400);
+    }
+    if (typeof body.sub !== "string" || !body.sub.trim()) {
+      return c.json({ error: "sub (institution/operator id) is required." }, 400);
+    }
+    const grant = credentialGrantsRole(
+      mintKeys,
+      presented,
+      body.role === "issuer" ? "issuer" : "correspondent",
+    );
+    // Allow minting with matching dual key OR shared api key
+    if (!grant.ok) {
+      // Legacy: shared apiKey can mint either role
+      const legacy = credentialGrantsRole(mintKeys, presented, "any");
+      if (!legacy.ok) {
+        return c.json({ error: grant.error }, grant.status);
+      }
+    }
+    const { signJwt } = await import("./jwt.js");
+    try {
+      const token = signJwt(
+        {
+          role: body.role,
+          sub: body.sub.trim(),
+          ttlSec:
+            typeof body.ttlSec === "number" && body.ttlSec > 0 && body.ttlSec <= 86_400
+              ? body.ttlSec
+              : 3600,
+        },
+        options.jwtSecret,
+      );
+      return c.json({
+        token,
+        token_type: "Bearer",
+        expires_in:
+          typeof body.ttlSec === "number" && body.ttlSec > 0 && body.ttlSec <= 86_400
+            ? body.ttlSec
+            : 3600,
+        role: body.role,
+        sub: body.sub.trim(),
+      });
+    } catch (err) {
+      return c.json({ error: String(err) }, 400);
+    }
+  });
 
   app.get("/api/openapi.json", async (c) => {
     try {

@@ -8,6 +8,7 @@
  */
 import type { Context, MiddlewareHandler, Next } from "hono";
 import { timingSafeEqual } from "node:crypto";
+import { verifyJwt } from "./jwt.js";
 
 export interface RateLimitState {
   /** window start ms */
@@ -129,6 +130,8 @@ export interface RoleKeys {
   apiKey?: string;
   issuerKey?: string;
   correspondentKey?: string;
+  /** HS256 secret for institutional JWTs (optional). */
+  jwtSecret?: string;
 }
 
 function extractPresentedKey(c: Context): string | undefined {
@@ -138,8 +141,93 @@ function extractPresentedKey(c: Context): string | undefined {
   );
 }
 
+function looksLikeJwt(token: string): boolean {
+  return token.split(".").length === 3;
+}
+
 /**
- * Role-aware auth. When no keys are configured, returns 503 (fail-closed)
+ * Resolve whether the presented credential grants the required role.
+ * Accepts static API keys or HS256 JWT with `role` claim.
+ */
+export function credentialGrantsRole(
+  keys: RoleKeys,
+  presented: string | undefined,
+  role: ApiRole,
+  nowSec: number = Math.floor(Date.now() / 1000),
+): { ok: true } | { ok: false; status: 401 | 403 | 503; error: string } {
+  const issuer = keys.issuerKey ?? keys.apiKey;
+  const correspondent = keys.correspondentKey ?? keys.apiKey;
+  const hasStatic = Boolean(issuer || correspondent || keys.apiKey);
+  const hasJwt = Boolean(keys.jwtSecret);
+
+  if (!hasStatic && !hasJwt) {
+    return {
+      ok: false,
+      status: 503,
+      error:
+        "API auth not configured. Set CDT_API_KEY and/or dual keys and/or CDT_JWT_SECRET.",
+    };
+  }
+
+  if (!presented) {
+    return { ok: false, status: 401, error: "Unauthorized." };
+  }
+
+  // Prefer JWT when secret configured and token is JWT-shaped.
+  if (hasJwt && looksLikeJwt(presented) && keys.jwtSecret) {
+    const verified = verifyJwt(presented, keys.jwtSecret, nowSec);
+    if (!verified.ok) {
+      return { ok: false, status: 401, error: verified.reason };
+    }
+    const jwtRole = verified.claims.role;
+    const ok =
+      role === "any" ||
+      (role === "issuer" && jwtRole === "issuer") ||
+      (role === "correspondent" && jwtRole === "correspondent");
+    if (!ok) {
+      return {
+        ok: false,
+        status: 403,
+        error: `Forbidden for role '${role}' (JWT role is '${jwtRole}').`,
+      };
+    }
+    return { ok: true };
+  }
+
+  // Static API keys
+  if (!hasStatic) {
+    return {
+      ok: false,
+      status: 401,
+      error: "Unauthorized (JWT required when only CDT_JWT_SECRET is set).",
+    };
+  }
+
+  const isIssuer = issuer ? safeEqual(presented, issuer) : false;
+  const isCorrespondent = correspondent
+    ? safeEqual(presented, correspondent)
+    : false;
+  const isLegacy = keys.apiKey ? safeEqual(presented, keys.apiKey) : false;
+
+  const ok =
+    role === "any"
+      ? isIssuer || isCorrespondent || isLegacy
+      : role === "issuer"
+        ? isIssuer || isLegacy
+        : isCorrespondent || isLegacy;
+
+  if (!ok) {
+    return {
+      ok: false,
+      status: 403,
+      error: `Forbidden for role '${role}'. Use the issuer/correspondent key or a JWT.`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * Role-aware auth. When no keys/JWT are configured, returns 503 (fail-closed)
  * unless the caller used allowOpenApi (createApp skips middleware).
  */
 export function requireRole(
@@ -148,43 +236,9 @@ export function requireRole(
 ): MiddlewareHandler {
   return async (c, next) => {
     const presented = extractPresentedKey(c);
-    const issuer = keys.issuerKey ?? keys.apiKey;
-    const correspondent = keys.correspondentKey ?? keys.apiKey;
-
-    if (!issuer && !correspondent && !keys.apiKey) {
-      return c.json(
-        {
-          error:
-            "API key not configured. Set CDT_API_KEY and/or CDT_ISSUER_API_KEY + CDT_CORRESPONDENT_API_KEY.",
-        },
-        503,
-      );
-    }
-
-    if (!presented) {
-      return c.json({ error: "Unauthorized." }, 401);
-    }
-
-    const isIssuer = issuer ? safeEqual(presented, issuer) : false;
-    const isCorrespondent = correspondent
-      ? safeEqual(presented, correspondent)
-      : false;
-    const isLegacy = keys.apiKey ? safeEqual(presented, keys.apiKey) : false;
-
-    const ok =
-      role === "any"
-        ? isIssuer || isCorrespondent || isLegacy
-        : role === "issuer"
-          ? isIssuer || isLegacy
-          : isCorrespondent || isLegacy;
-
-    if (!ok) {
-      return c.json(
-        {
-          error: `Forbidden for role '${role}'. Use the issuer or correspondent institutional key.`,
-        },
-        403,
-      );
+    const result = credentialGrantsRole(keys, presented, role);
+    if (!result.ok) {
+      return c.json({ error: result.error }, result.status);
     }
     await next();
   };
@@ -215,8 +269,8 @@ export function publicOrRoleAuthed(
     return next();
   }
   if (role === "any") {
-    // Prefer dual-key aware "any", else legacy single key.
-    if (keys.issuerKey || keys.correspondentKey || keys.apiKey) {
+    // Prefer dual-key / JWT aware "any", else legacy single key.
+    if (keys.issuerKey || keys.correspondentKey || keys.apiKey || keys.jwtSecret) {
       return requireRole(keys, "any")(c, next);
     }
     return requireApiKey(keys.apiKey)(c, next);
