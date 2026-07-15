@@ -22,7 +22,7 @@ The mint policy enforces **per-transaction** uniqueness of `deposit_id` as the a
 
 ## Recommended design: registry UTxO + mint co-spend
 
-```
+```text
 ┌─────────────┐     spend + append      ┌──────────────────┐
 │ Registry    │ ──────────────────────► │ Registry'        │
 │ UTxO        │     (same tx as mint)   │ UTxO             │

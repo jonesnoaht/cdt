@@ -24,7 +24,7 @@
 
 ## 2. Trust model
 
-```
+```text
 Member wallet ──signs──► Redeem / EarlyWithdraw (vault)
 Oracle VKH    ──co-signs► MintCD only
 Issuer desk   ──off-chain► SettlementAuth (not on-chain)
