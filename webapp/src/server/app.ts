@@ -111,6 +111,10 @@ export interface AppOptions {
   apiKey?: string | null;
   /** When true and apiKey is null/empty, skip auth (lab/tests only). */
   allowOpenApi?: boolean;
+  /** Burn validation mode for accept-burn. */
+  burnValidateMode?: "off" | "soft" | "strict";
+  /** Optional CDT mint policy id (hex) for burn matching. */
+  cdtPolicyId?: string;
 }
 
 interface MemberIdentity {
@@ -143,7 +147,18 @@ export function createApp(options: AppOptions): Hono {
   const { pool } = options;
   const now = options.now ?? Date.now;
   const koiosBaseUrl = options.koiosBaseUrl ?? "https://preview.koios.rest/api/v1";
-  const presentments = options.presentmentStore ?? new PresentmentStore(pool);
+  const presentments =
+    options.presentmentStore ??
+    new PresentmentStore({
+      pool,
+      burnValidation: {
+        mode: options.burnValidateMode ?? "off",
+        provider: options.chainProvider,
+        koiosBaseUrl,
+        policyId: options.cdtPolicyId,
+        fetchImpl: options.fetchImpl,
+      },
+    });
   void presentments.init();
   const paymentOracle = options.paymentOracle ?? new PaymentOracle();
   const allowOpenApi = options.allowOpenApi === true;
@@ -171,6 +186,41 @@ export function createApp(options: AppOptions): Hono {
   });
 
   app.get("/api/health", (c) => c.json({ ok: true }));
+
+  app.get("/api/openapi.json", async (c) => {
+    try {
+      const { readFile } = await import("node:fs/promises");
+      const { join } = await import("node:path");
+      // Prefer monorepo docs path when running from webapp/
+      const candidates = [
+        join(process.cwd(), "docs/openapi/settlement-v1.yaml"),
+        join(process.cwd(), "../docs/openapi/settlement-v1.yaml"),
+      ];
+      const { existsSync } = await import("node:fs");
+      const path = candidates.find((p) => existsSync(p));
+      if (!path) {
+        return c.json(
+          {
+            openapi: "3.1.0",
+            info: {
+              title: "CDT Settlement Network API",
+              version: "0.2.0",
+              description: "See docs/openapi/settlement-v1.yaml in the repository.",
+            },
+          },
+          200,
+        );
+      }
+      // Serve YAML as text; clients can convert. Also expose path.
+      const yaml = await readFile(path, "utf8");
+      return c.text(yaml, 200, {
+        "content-type": "application/yaml; charset=utf-8",
+        "x-openapi-source": path,
+      });
+    } catch (err) {
+      return c.json({ error: String(err) }, 500);
+    }
+  });
 
   // --- Attestation proof (verifiable link deposit ↔ account) ---------------
   app.get("/api/attestations/:depositId", async (c) => {
@@ -509,7 +559,10 @@ export function createApp(options: AppOptions): Hono {
     if (id === null) return c.json({ error: "Invalid presentment id." }, 400);
     const result = await presentments.acceptBurn(id);
     if ("error" in result) {
-      return c.json({ error: result.error }, result.status as 404 | 422);
+      return c.json(
+        { error: result.error, reasonCode: "reasonCode" in result ? result.reasonCode : undefined },
+        result.status as 404 | 422,
+      );
     }
     return c.json(result);
   });

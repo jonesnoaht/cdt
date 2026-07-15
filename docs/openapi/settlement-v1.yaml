@@ -1,0 +1,199 @@
+openapi: 3.1.0
+info:
+  title: CDT Settlement Network API (Issuer)
+  version: 0.2.0
+  description: |
+    Bilateral pilot API for correspondent burn-and-settle of Certificate of
+    Deposit Tokens. Implements the message flow in docs/network/05-messaging-protocol.md.
+
+    Auth: `Authorization: Bearer <CDT_API_KEY>` or `X-API-Key` on non-public routes.
+    Hold-until-burn is mandatory for production-shaped desks.
+servers:
+  - url: http://127.0.0.1:8787
+    description: Local lab (default bind)
+paths:
+  /api/health:
+    get:
+      operationId: health
+      summary: Liveness
+      security: []
+      responses:
+        "200":
+          description: OK
+  /api/settlement/pubkey:
+    get:
+      operationId: settlementPubkey
+      summary: Pin issuer SettlementAuth public key
+      security: []
+      responses:
+        "200":
+          description: Ed25519 SPKI (base64)
+  /api/claims/{ref}:
+    get:
+      operationId: claimLookup
+      summary: ClaimLookup — live certificate quote
+      parameters:
+        - name: ref
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Deposit id or bank transaction id
+      responses:
+        "200":
+          description: ClaimResponse
+        "404":
+          description: NOT_FOUND
+  /api/presentments:
+    get:
+      operationId: listPresentments
+      summary: List presentments (issuer registry)
+      responses:
+        "200":
+          description: Array of presentments
+    post:
+      operationId: createPresentment
+      summary: PresentmentRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PresentmentRequest"
+      responses:
+        "201":
+          description: Created (status pending_burn)
+        "409":
+          description: DOUBLE_PRESENTMENT
+        "422":
+          description: Validation / not redeemable
+  /api/presentments/{id}:
+    get:
+      operationId: getPresentment
+      parameters:
+        - $ref: "#/components/parameters/PresentmentId"
+      responses:
+        "200":
+          description: Presentment
+        "404":
+          description: Not found
+  /api/presentments/{id}/authorize:
+    post:
+      operationId: issueSettlementAuth
+      summary: SettlementAuth (signed, burn_required, TTL)
+      parameters:
+        - $ref: "#/components/parameters/PresentmentId"
+      responses:
+        "200":
+          description: Presentment with settlementAuth
+        "422":
+          description: Wrong status
+  /api/presentments/{id}/burn-evidence:
+    post:
+      operationId: submitBurnEvidence
+      summary: BurnEvidence — record Cardano burn tx hash
+      parameters:
+        - $ref: "#/components/parameters/PresentmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [txHash]
+              properties:
+                txHash:
+                  type: string
+                  pattern: "^[0-9a-fA-F]{64}$"
+                mode:
+                  type: string
+                  enum: [redeem, early_withdraw, mature, early]
+      responses:
+        "200":
+          description: burn_submitted
+        "409":
+          description: Duplicate burn tx
+  /api/presentments/{id}/accept-burn:
+    post:
+      operationId: acceptBurn
+      summary: BurnAccepted — validate on-chain burn then accept
+      description: |
+        When BURN_VALIDATE_MODE=strict and CHAIN_PROVIDER=koios-preview, verifies
+        the tx burns the CDT asset for this deposit (optional CDT_POLICY_ID).
+      parameters:
+        - $ref: "#/components/parameters/PresentmentId"
+      responses:
+        "200":
+          description: burn_accepted (+ burnValidation details)
+        "404":
+          description: TX_NOT_FOUND
+        "422":
+          description: TX_INVALID / wrong status
+  /api/presentments/{id}/settlement-payment:
+    post:
+      operationId: recordSettlementPayment
+      summary: SettlementPayment audit record (rail adapter later)
+      parameters:
+        - $ref: "#/components/parameters/PresentmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amountCents, rail, traceId]
+              properties:
+                amountCents:
+                  type: integer
+                rail:
+                  type: string
+                  example: ACH
+                traceId:
+                  type: string
+                paidAt:
+                  type: string
+                  format: date-time
+      responses:
+        "200":
+          description: settled
+components:
+  parameters:
+    PresentmentId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+  schemas:
+    PresentmentRequest:
+      type: object
+      required: [claimRef, walkInName, checks]
+      properties:
+        claimRef:
+          type: string
+        walkInName:
+          type: string
+        presentingCuName:
+          type: string
+        checks:
+          type: object
+          required: [cip, ofac, ownershipProof]
+          properties:
+            cip:
+              type: boolean
+            ofac:
+              type: boolean
+            ownershipProof:
+              type: boolean
+  securitySchemes:
+    ApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    Bearer:
+      type: http
+      scheme: bearer
+security:
+  - ApiKey: []
+  - Bearer: []

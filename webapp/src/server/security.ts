@@ -108,6 +108,7 @@ export function resetRateLimits(): void {
 export function isPublicPath(path: string): boolean {
   return (
     path === "/api/health" ||
+    path === "/api/openapi.json" ||
     path === "/api/payment/contract" ||
     path === "/api/payment/oracle-pubkey" ||
     path === "/api/correspondent/meta" ||
