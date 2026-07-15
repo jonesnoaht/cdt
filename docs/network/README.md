@@ -5,6 +5,8 @@
 **Author:** Noah Jones  
 **Status:** Working drafts for counsel and pilot partners — not executed legal instruments  
 
+Related: [docs index](../README.md) · [operator manual](../manual.md) · [messaging protocol live APIs](./05-messaging-protocol.md)
+
 > **Disclaimer.** These materials are planning and negotiation aids for the
 > Certificate of Deposit Token (CDT) prototype. They are **not** legal advice,
 > not an offer of securities or deposit products, and not a substitute for

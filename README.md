@@ -83,20 +83,26 @@ by Hyperledger Identus, which is the production path; this repo ships a mock
 
 | Directory | Contents |
 | --- | --- |
-| `onchain/` | Aiken (Plutus V3) validators: `cd_vault` (holds principal + interest, enforces terms) and `cdt_mint` (mint/burn policy); compiled `plutus.json` blueprint. |
+| `onchain/` | Aiken (Plutus V3) validators: `cd_vault` (holds principal + interest, enforces terms) and `cdt_mint` (mint/burn policy); scaffold `deposit_registry`; compiled `plutus.json` blueprint. |
 | `offchain/cdt-txlib/` | TypeScript transaction library: datum codecs, simple-interest math, and transaction builders. |
 | `offchain/oracle-watcher/` | The oracle: polls the bank database, verifies credentials, and produces signed mint attestations. |
 | `offchain/demo/` | Flagship narrated demo of the full CD lifecycle on a local Lucid emulator (`npm run demo`). |
+| `offchain/pipeline/` | End-to-end issuance service (watcher → mint → redeem). |
+| `offchain/testnet/` | Preview-testnet lifecycle + evidence notes. |
+| `webapp/` | Member portal and **bank desks**: issuer tokenize (`#/open`), correspondent presentment (`#/present`), payment terminal (`#/pay`), mobile sign (`#/sign`). |
 | `bank-sim/` | Postgres bank simulator (schema + seed data) via Docker, on port 55432. |
 | `credentials/` | Mock `did:key` DIDs and W3C verifiable credentials (production path: Hyperledger Identus). |
-| `docs/` | Whitepaper, architecture, proposal, network settlement package, production readiness, compliance, feasibility, rollout. |
+| `docs/` | **[Operator manual](docs/manual.md)**, [docs index](docs/README.md), whitepaper, network package, production readiness, security audit. |
 | `legacy/` | The original 2021 material (Plutus/Haskell experiments and planning docs), kept for provenance. |
 | `.github/workflows/` | CI: Aiken checks and package tests. |
 
 ## Quickstart
 
 Prerequisites: [Aiken](https://aiken-lang.org) (install via `aikup`) and
-Node.js 22.
+Node.js 22. Use `npm ci --include=dev` in this monorepo.
+
+**Full operator / demo guide:** [docs/manual.md](docs/manual.md)  
+**Documentation index:** [docs/README.md](docs/README.md)
 
 ```sh
 # 1. Check the on-chain validators
@@ -106,23 +112,28 @@ cd ..
 
 # 2. Run the flagship lifecycle demo (local emulator; no real chain needed)
 cd offchain/demo
-npm ci
+npm ci --include=dev
 npm run demo
 cd ../..
 
-# 3. Optional: bring up the bank simulator (Postgres on port 55432)
+# 3. Optional: bank simulator + webapp desks
 cd bank-sim
-docker compose up -d
-npm ci
-npm run seed
-cd ..
+docker compose up -d --wait
+npm ci --include=dev
+npm run db:apply && npm run seed
+cd ../webapp
+npm ci --include=dev
+PGHOST=localhost PGPORT=55432 PGUSER=bank PGPASSWORD=bank PGDATABASE=bank_sim \
+  CDT_ALLOW_OPEN_API=1 ALLOW_EPHEMERAL_PAYMENT_ORACLE=1 \
+  BURN_VALIDATE_MODE=off SETTLEMENT_RAIL=mock \
+  npm run dev
+# Portal: http://localhost:5173/   API: http://127.0.0.1:8787/api/health
 ```
 
-Each TypeScript package (`offchain/cdt-txlib`, `offchain/oracle-watcher`,
-`offchain/demo`, `credentials`) also has its own test suite:
+Each TypeScript package also has its own test suite:
 
 ```sh
-npm ci && npm test
+npm ci --include=dev && npm test
 ```
 
 ## Status
@@ -132,12 +143,21 @@ runs against an in-process emulator with mock credentials; there is no
 deployed mainnet contract, no real bank integration, and no regulatory
 approval. Nothing in this repository is legal or financial advice.
 
-- Whitepaper and analysis: see `docs/`
-  (`whitepaper.md`, `architecture.md`, `proposal.md`, `network/` settlement
-  package, `security-audit.md`, `production-readiness.md`, `why-cardano.md`, `compliance.md`,
-  `feasibility.md`, `rollout.md`, `payment-check-contract.md`).
-- The 2021 origins (Plutus/Haskell prototypes, meeting notes, Catalyst
-  proposal drafts): see `legacy/`.
+### Documentation
+
+| Doc | Purpose |
+| --- | --- |
+| [docs/manual.md](docs/manual.md) | **Operator & demo manual** (run, desks, env, smoke) |
+| [docs/README.md](docs/README.md) | Full documentation index |
+| [docs/whitepaper.md](docs/whitepaper.md) | Product thesis |
+| [docs/architecture.md](docs/architecture.md) | System design |
+| [docs/production-readiness.md](docs/production-readiness.md) | Pilot checklist |
+| [docs/security-audit.md](docs/security-audit.md) | Security findings |
+| [docs/network/](docs/network/) | Multi-CU settlement package |
+| [docs/compliance.md](docs/compliance.md) | CIP / BSA framing |
+
+2021 origins (Plutus/Haskell prototypes, meeting notes, Catalyst proposal
+drafts): see `legacy/`.
 
 ## History
 
