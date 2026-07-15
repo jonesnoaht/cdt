@@ -13,6 +13,8 @@ const sampleDatum: CDDatum = {
   maturity: 1_731_557_600_000n,
   penalty_bps: 2_000n,
   cdt_policy: "cc".repeat(28),
+  account_id: fromText("42"),
+  attestation_hash: "01".repeat(32),
 };
 
 describe("CDDatum", () => {
@@ -36,6 +38,8 @@ describe("CDDatum", () => {
       sampleDatum.maturity,
       sampleDatum.penalty_bps,
       sampleDatum.cdt_policy,
+      sampleDatum.account_id,
+      sampleDatum.attestation_hash,
     ]);
   });
 
@@ -56,6 +60,8 @@ describe("CDDatum", () => {
       maturity: nat,
       penalty_bps: nat,
       cdt_policy: hex(28),
+      account_id: varHex,
+      attestation_hash: hex(32),
     });
     fc.assert(
       fc.property(datumArb, (datum) => {
@@ -92,7 +98,7 @@ describe("MintRedeemer", () => {
     expect(constr.fields).toHaveLength(1);
     const datumConstr = constr.fields[0] as Constr<Data>;
     expect(datumConstr.index).toBe(0);
-    expect(datumConstr.fields).toHaveLength(9);
+    expect(datumConstr.fields).toHaveLength(11);
     // The wrapped datum must encode identically to a standalone CDDatum.
     expect(Data.to(datumConstr as Data)).toBe(Data.to(sampleDatum, CDDatum));
   });

@@ -186,7 +186,7 @@ export class PresentmentStore {
     const dto: PresentmentDto = {
       id,
       createdAt: new Date(nowMs).toISOString(),
-      status: "cash_advanced_pending_settlement",
+      status: "pending_burn",
       presentingCuName: presentingCu,
       issuerName: claim.issuerName,
       walkInName: walkIn,
@@ -201,14 +201,22 @@ export class PresentmentStore {
       holderWallet: claim.holderWallet,
       settlement:
         mode === "mature"
-          ? `Request mature redemption settlement of $${(claim.cashOutCents / 100).toFixed(2)} from ${claim.issuerName} against deposit ${claimKey}. Holder must co-sign vault Redeem / burn CDT; issuer wires funds to ${presentingCu}.`
-          : `Request early-withdrawal settlement of $${(claim.cashOutCents / 100).toFixed(2)} (penalty applied) from ${claim.issuerName} against deposit ${claimKey}. Holder co-signs EarlyWithdraw + burn; issuer settles net to ${presentingCu}.`,
+          ? `HOLD FUNDS until burn. Mature settlement of $${(claim.cashOutCents / 100).toFixed(2)} from ${claim.issuerName} against deposit ${claimKey}. Holder co-signs vault Redeem / burn CDT; issuer wires to ${presentingCu}.`
+          : `HOLD FUNDS until burn. Early-withdrawal settlement of $${(claim.cashOutCents / 100).toFixed(2)} (penalty applied) from ${claim.issuerName} against deposit ${claimKey}. Holder co-signs EarlyWithdraw + burn; issuer settles net to ${presentingCu}.`,
       nextSteps: [
-        "Advance cash to the walk-in customer from this CU's vault cash / share draft.",
-        "Obtain holder wallet signature authorization for Redeem or EarlyWithdraw (or issuer-operated recovery path).",
-        "File settlement claim with the issuing CU treasury desk with presentment id and deposit id.",
-        "When issuer confirms burn + core close, mark receivable paid; do not double-pay the holder.",
+        "Do NOT advance unrestricted cash yet — place hold or wait for burn.",
+        "Obtain holder wallet signature for Redeem or EarlyWithdraw (or issuer recovery path).",
+        "Submit burn tx hash to issuer; wait for BurnAccepted + core close.",
+        "Only then release credit / cash; file settlement claim with presentment id.",
       ],
+      settlementInstructions: [
+        "DO NOT advance unrestricted cash until burn evidence is accepted.",
+        `1. Obtain holder co-signature for ${mode === "mature" ? "Redeem" : "EarlyWithdraw"} (burn CDT ${claim.claim.depositId ?? claim.claim.transactionId}).`,
+        "2. Submit burn tx hash to the issuer; wait for BurnAccepted.",
+        `3. Issuer closes deposit on core and settles ${claim.cashOutCents} cents to ${presentingCu}.`,
+        "4. Only then post final share-credit to the walk-in (or release hold).",
+        "NCUSIF coverage remains with the issuing CU until the certificate is closed on its books.",
+      ].join("\n"),
     };
     this.byId.set(id, dto);
     const list = this.byClaim.get(claimKey) ?? [];

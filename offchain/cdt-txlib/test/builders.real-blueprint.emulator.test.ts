@@ -61,6 +61,8 @@ function attestedDatum(ctx: Ctx, scripts: CdtScripts): CDDatum {
     maturity: ctx.terms.maturity,
     penalty_bps: ctx.terms.penaltyBps,
     cdt_policy: scripts.policyId,
+    account_id: ctx.terms.accountId,
+    attestation_hash: ctx.terms.attestationHash,
   };
 }
 

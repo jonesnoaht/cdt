@@ -27,6 +27,12 @@ import {
   lookupClaim,
 } from "./presentments.js";
 import { PaymentOracle } from "./payment-oracle.js";
+import {
+  isPublicPath,
+  publicOrAuthed,
+  rateLimit,
+  securityHeaders,
+} from "./security.js";
 
 /**
  * Largest deposit (in cents) whose lovelace representation still fits in a
@@ -98,6 +104,13 @@ export interface AppOptions {
   presentmentStore?: PresentmentStore;
   /** Optional payment oracle (tests inject for stable keys / isolation). */
   paymentOracle?: PaymentOracle;
+  /**
+   * API key for protected routes. Pass explicit string for tests.
+   * Pass `null` with allowOpenApi for open lab mode.
+   */
+  apiKey?: string | null;
+  /** When true and apiKey is null/empty, skip auth (lab/tests only). */
+  allowOpenApi?: boolean;
 }
 
 interface MemberIdentity {
@@ -132,10 +145,68 @@ export function createApp(options: AppOptions): Hono {
   const koiosBaseUrl = options.koiosBaseUrl ?? "https://preview.koios.rest/api/v1";
   const presentments = options.presentmentStore ?? new PresentmentStore();
   const paymentOracle = options.paymentOracle ?? new PaymentOracle();
+  const allowOpenApi = options.allowOpenApi === true;
+  const apiKey =
+    options.apiKey === null
+      ? undefined
+      : options.apiKey === undefined
+        ? undefined
+        : options.apiKey;
 
   const app = new Hono();
+  app.use("*", securityHeaders());
+  app.use(
+    "/api/*",
+    rateLimit({ windowMs: 60_000, max: 300 }),
+  );
+  app.use("/api/*", async (c, next) => {
+    if (allowOpenApi && !apiKey) {
+      return next();
+    }
+    if (isPublicPath(c.req.path)) {
+      return next();
+    }
+    return publicOrAuthed(apiKey, c, next);
+  });
 
   app.get("/api/health", (c) => c.json({ ok: true }));
+
+  // --- Attestation proof (verifiable link deposit ↔ account) ---------------
+  app.get("/api/attestations/:depositId", async (c) => {
+    const depositId = c.req.param("depositId");
+    const { rows } = await pool.query(
+      `SELECT a.transaction_id, a.deposit_id, a.account_id, a.attestation_hash,
+              a.payload, a.signed_at,
+              t.amount_cents, t.attested,
+              acc.member_name, acc.wallet_address, acc.did
+         FROM attestations a
+         JOIN transactions t ON t.id = a.transaction_id
+         JOIN accounts acc ON acc.id = t.account_id
+        WHERE a.deposit_id = $1 OR a.transaction_id::text = $1
+        LIMIT 1`,
+      [depositId],
+    );
+    const row = rows[0];
+    if (!row) return c.json({ error: "Attestation not found." }, 404);
+    const payload = row.payload;
+    return c.json({
+      depositId: row.deposit_id,
+      accountId: row.account_id,
+      attestationHash: row.attestation_hash,
+      transactionId: row.transaction_id,
+      signedAt: row.signed_at,
+      attested: row.attested,
+      // Linkage fields (no full member dossier)
+      ownerWallet: row.wallet_address,
+      ownerDid: row.did,
+      signedAttestation: payload,
+      verification: {
+        schema: "cdt.attestation.v2",
+        instructions:
+          "Verify Ed25519 signature over canonicalize(payload) with the pinned mint-oracle public key; recompute SHA-256(canonicalize(payload)) and match attestationHash and vault datum.attestation_hash; require payload.account_id and deposit_id match the bank claim.",
+      },
+    });
+  });
 
   // --- CD product catalog ---------------------------------------------------
   app.get("/api/products", async (c) => {

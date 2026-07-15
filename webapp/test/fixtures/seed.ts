@@ -31,8 +31,11 @@ export interface FixtureIds {
 }
 
 export interface AttestationPayloadFixture {
+  schema: "cdt.attestation.v2";
   deposit_id: string;
+  account_id: string;
   owner: string;
+  owner_did: string;
   principal: number; // lovelace
   rate_bps: number;
   start: number;
@@ -86,7 +89,9 @@ async function insertDeposit(
 async function insertAttestation(
   pool: pg.Pool,
   transactionId: number,
+  accountId: number,
   payload: AttestationPayloadFixture,
+  attestationHashHex: string,
   txHash?: string,
 ): Promise<void> {
   const signed = {
@@ -94,12 +99,19 @@ async function insertAttestation(
     signature: "Zml4dHVyZS1zaWduYXR1cmU=",
     algorithm: "Ed25519",
     oracle_public_key: "Zml4dHVyZS1vcmFjbGUta2V5",
+    attestation_hash_hex: attestationHashHex,
     ...(txHash ? { tx_hash: txHash } : {}),
   };
   await pool.query(
-    `INSERT INTO attestations (transaction_id, deposit_id, payload)
-     VALUES ($1, $2, $3)`,
-    [transactionId, payload.deposit_id, JSON.stringify(signed)],
+    `INSERT INTO attestations (transaction_id, deposit_id, account_id, attestation_hash, payload)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [
+      transactionId,
+      payload.deposit_id,
+      String(accountId),
+      attestationHashHex,
+      JSON.stringify(signed),
+    ],
   );
 }
 
@@ -133,15 +145,18 @@ export async function seedFixture(pool: pg.Pool, nowMs = Date.now()): Promise<Fi
     pool, adaFunding, 2_500_00, twelveMonth, "fund 12-month certificate", true, activeStart,
   );
   const activePayload: AttestationPayloadFixture = {
+    schema: "cdt.attestation.v2",
     deposit_id: String(activeTxId),
+    account_id: String(adaFunding),
     owner: ADA_WALLET,
+    owner_did: ADA_DID,
     principal: 2_500_00 * LOVELACE_PER_CENT,
     rate_bps: 450,
     start: activeStart,
     maturity: activeStart + 365 * DAY_MS,
     penalty_bps: 1000,
   };
-  await insertAttestation(pool, activeTxId, activePayload, ACTIVE_TX_HASH);
+  await insertAttestation(pool, activeTxId, adaFunding, activePayload, "ab".repeat(32), ACTIVE_TX_HASH);
 
   // MATURED: 6-month CD, attested 400 days ago (term long since ended).
   const maturedStart = nowMs - 400 * DAY_MS;
@@ -149,15 +164,18 @@ export async function seedFixture(pool: pg.Pool, nowMs = Date.now()): Promise<Fi
     pool, adaFunding, 600_00, sixMonth, "fund 6-month certificate", true, maturedStart,
   );
   const maturedPayload: AttestationPayloadFixture = {
+    schema: "cdt.attestation.v2",
     deposit_id: String(maturedTxId),
+    account_id: String(adaFunding),
     owner: ADA_WALLET,
+    owner_did: ADA_DID,
     principal: 600_00 * LOVELACE_PER_CENT,
     rate_bps: 400,
     start: maturedStart,
     maturity: maturedStart + 182 * DAY_MS,
     penalty_bps: 1000,
   };
-  await insertAttestation(pool, maturedTxId, maturedPayload);
+  await insertAttestation(pool, maturedTxId, adaFunding, maturedPayload, "cd".repeat(32));
 
   // PENDING: unattested CD-funding deposit.
   const pendingTxId = await insertDeposit(

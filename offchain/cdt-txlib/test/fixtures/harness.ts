@@ -65,6 +65,8 @@ export async function setup(): Promise<Ctx> {
     start,
     maturity: start + TERM_MS,
     penaltyBps: PENALTY_BPS,
+    accountId: fromText("1"),
+    attestationHash: "ab".repeat(32),
   };
   return { emulator, lucid, member, oracle, issuer, oracleVkh, terms };
 }

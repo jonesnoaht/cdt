@@ -1,10 +1,33 @@
 # CDT Security Audit — Working Prototype
 
 **Date:** July 2026  
+**Updated:** July 2026 (remediation wave)  
 **Auditor:** Hermes Agent (repository review)  
 **Scope:** Code and configuration present in this repository as of the audit  
-**Status:** Prototype / demo — **not production-certified**  
+**Status:** Prototype — critical/high items addressed in code; not production-certified  
 **Related:** [compliance.md](./compliance.md) · [architecture.md](./architecture.md) · [whitepaper.md](./whitepaper.md) · [network risk memo](./network/09-risk-and-compliance-memo.md)
+
+---
+
+## Remediation status (2026-07)
+
+| ID | Finding | Status |
+| --- | --- | --- |
+| **Issuance linkage** | Every mint bound to attested account | **Fixed:** `CDDatum.account_id` + `attestation_hash` (32-byte SHA-256); mint policy enforces non-empty account_id and hash length 32; oracle payload `cdt.attestation.v2` includes `account_id` + `owner_did`; DB UNIQUE on `deposit_id` / hash; `GET /api/attestations/:depositId` for public verification instructions |
+| C-1 | Oracle accept-all VC | **Fixed:** fail-closed unless `CDT_ORACLE_ACCEPT_ALL_VC=1`; no private key logging; require `ORACLE_SIGNING_KEY_PEM` unless `ALLOW_EPHEMERAL_ORACLE_KEY=1` |
+| C-2 | Unauthenticated API | **Fixed:** API key middleware (`CDT_API_KEY`); open lab only via `CDT_ALLOW_OPEN_API=1` / `allowOpenApi` |
+| H-1 | Default DB password | **Mitigated:** no default password when `NODE_ENV=production` |
+| H-2 | Ephemeral keys / log PEM | **Fixed:** no private key print; payment oracle stable PEM env; host bind `127.0.0.1` |
+| H-3 | Cash without burn | **Fixed:** presentment status `pending_burn`; desk instructions hold-until-burn |
+| H-4 | Checkbox CIP | **Partial:** still demo checkboxes (no IDV vendor); API requires all flags true |
+| H-5 | Double mint uniqueness | **Mitigated off-chain:** UNIQUE `deposit_id` + unique attestation hash; on-chain still requires honest oracle across txs (documented) |
+| M-1 | PII leak | **Partial:** attestation endpoint returns linkage fields only |
+| M-2 | Rate limits | **Fixed:** 300 req/min per client key |
+| M-3 | In-memory presentments | **Open** (demo) |
+| M-4 | Payment possession | **Mitigated:** `payerWallet` **required** and must match owner |
+| L-2 | Security headers | **Fixed:** CSP, nosniff, frame deny, no-store |
+
+Remaining production work: Identus wire-up, HSM keys, durable presentment table, professional SC audit, on-chain one-shot deposit_id registry.
 
 ---
 

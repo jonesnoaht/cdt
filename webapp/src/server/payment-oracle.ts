@@ -145,11 +145,13 @@ export class PaymentOracle {
       };
     }
 
-    if (
-      typeof body.payerWallet === "string" &&
-      body.payerWallet.trim() &&
-      body.payerWallet.trim() !== claim.holderWallet
-    ) {
+    if (typeof body.payerWallet !== "string" || !body.payerWallet.trim()) {
+      return {
+        ok: false,
+        reason: "payerWallet is required and must match the attested certificate owner (possession check).",
+      };
+    }
+    if (body.payerWallet.trim() !== claim.holderWallet) {
       return {
         ok: false,
         reason: "payerWallet does not match the attested certificate owner wallet.",

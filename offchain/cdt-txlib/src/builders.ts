@@ -72,6 +72,17 @@ export interface CDTerms {
   maturity: bigint;
   /** Early-withdrawal penalty on accrued interest, in basis points. */
   penaltyBps: bigint;
+  /**
+   * Bank-core account id that funded the CD (UTF-8, hex-encoded via fromText
+   * or raw hex of UTF-8 bytes). Bound into the vault datum and must match the
+   * oracle attestation's account_id.
+   */
+  accountId: string;
+  /**
+   * 32-byte SHA-256 of the canonical oracle attestation payload, as hex
+   * (64 hex chars). On-chain mint requires length == 32 bytes.
+   */
+  attestationHash: string;
 }
 
 export interface MintTxParams extends CdtScriptParams {
@@ -197,6 +208,21 @@ export async function buildMintTx(
       `terms.depositId must be 1..32 bytes, got ${depositId.length / 2}`,
     );
   }
+  const accountId = assertHexBytes("terms.accountId", terms.accountId);
+  if (accountId.length === 0 || accountId.length > 64) {
+    throw new Error(
+      `terms.accountId must be 1..32 bytes, got ${accountId.length / 2}`,
+    );
+  }
+  const attestationHash = assertHexBytes(
+    "terms.attestationHash",
+    terms.attestationHash,
+  );
+  if (attestationHash.length !== 64) {
+    throw new Error(
+      `terms.attestationHash must be exactly 32 bytes (64 hex chars), got ${attestationHash.length / 2}`,
+    );
+  }
   validateTermRanges("terms", {
     principal: terms.principal,
     rate_bps: terms.rateBps,
@@ -222,6 +248,8 @@ export async function buildMintTx(
     maturity: terms.maturity,
     penalty_bps: terms.penaltyBps,
     cdt_policy: scripts.policyId,
+    account_id: accountId,
+    attestation_hash: attestationHash,
   };
   const datumCbor = Data.to(datum, CDDatum);
 

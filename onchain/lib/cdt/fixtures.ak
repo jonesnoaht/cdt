@@ -32,6 +32,12 @@ pub const cdt_policy: PolicyId =
 
 pub const deposit_id: ByteArray = "DEP-2026-0001"
 
+pub const account_id: ByteArray = "42"
+
+/// 32-byte attestation hash fixture (not a real hash of sample terms).
+pub const attestation_hash: ByteArray =
+  #"0101010101010101010101010101010101010101010101010101010101010101"
+
 // -- Sample CD terms -----------------------------------------------------------
 
 /// 100 ADA principal, 5% annual rate, 1-year term, 30% penalty on accrued
@@ -57,6 +63,8 @@ pub fn sample_datum() -> CDDatum {
     maturity,
     penalty_bps,
     cdt_policy,
+    account_id,
+    attestation_hash,
   }
 }
 

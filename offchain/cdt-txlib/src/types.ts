@@ -10,20 +10,9 @@ import { Data } from "@lucid-evolution/lucid";
 /**
  * The CD terms datum locked at the vault validator.
  *
- * On-chain (Aiken):
- * ```aiken
- * pub type CDDatum {
- *   owner: VerificationKeyHash,
- *   issuer: ByteArray,
- *   deposit_id: ByteArray,
- *   principal: Int,
- *   rate_bps: Int,
- *   start: Int,      // POSIX ms
- *   maturity: Int,   // POSIX ms
- *   penalty_bps: Int,
- *   cdt_policy: ByteArray,
- * }
- * ```
+ * On-chain (Aiken) field order:
+ * owner, issuer, deposit_id, principal, rate_bps, start, maturity,
+ * penalty_bps, cdt_policy, account_id, attestation_hash
  */
 export const CDDatumSchema = Data.Object({
   owner: Data.Bytes({ minLength: 28, maxLength: 28 }),
@@ -35,6 +24,10 @@ export const CDDatumSchema = Data.Object({
   maturity: Data.Integer(),
   penalty_bps: Data.Integer(),
   cdt_policy: Data.Bytes(),
+  /** Bank-core account id (UTF-8), bound by the oracle attestation. */
+  account_id: Data.Bytes(),
+  /** 32-byte SHA-256 of the canonical oracle attestation payload. */
+  attestation_hash: Data.Bytes({ minLength: 32, maxLength: 32 }),
 });
 export type CDDatum = Data.Static<typeof CDDatumSchema>;
 export const CDDatum = CDDatumSchema as unknown as CDDatum;

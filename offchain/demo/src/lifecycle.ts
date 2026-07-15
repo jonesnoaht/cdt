@@ -358,6 +358,8 @@ export async function mintCd(
     maturity,
     penalty_bps: params.penaltyBps,
     cdt_policy: contracts.policyId,
+    account_id: fromText("1"),
+    attestation_hash: "cd".repeat(32),
   };
   const unit = cdtUnit(ctx, depositIdHex);
   const locked = maturePayoutOf(datum);

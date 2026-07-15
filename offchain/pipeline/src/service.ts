@@ -353,6 +353,8 @@ export class IssuanceService {
       start: BigInt(payload.start),
       maturity: BigInt(payload.maturity),
       penaltyBps: BigInt(payload.penalty_bps),
+      accountId: fromText(String(payload.account_id)),
+      attestationHash: attestation.attestation_hash_hex,
     };
 
     chain.selectWallet(chain.issuer.privateKey);
