@@ -8,7 +8,7 @@
 **Date:** July 2026  
 **Status:** Technical whitepaper for the working prototype  
 
-**Related documents:** [Architecture](./architecture.md) · [Compliance analysis](./compliance.md) · [Business proposal](./proposal.md) · [Business plan](./business-plan.md) · [Settlement network package](./network/README.md) · [Feasibility](./feasibility.md) · [Rollout](./rollout.md) · [Why Cardano](./why-cardano.md) · [Payment-check contract](./payment-check-contract.md)
+**Related documents:** [Architecture](./architecture.md) · [Compliance analysis](./compliance.md) · [Business proposal](./proposal.md) · [Business plan](./business-plan.md) · [Settlement network package](./network/README.md) · [Feasibility](./feasibility.md) · [Rollout](./rollout.md) · [Why Cardano](./why-cardano.md) · [Payment-check contract](./payment-check-contract.md) · [Product position (CU login → Lace)](./product-position.md)
 
 ---
 
@@ -37,6 +37,12 @@ and early-withdrawal penalty—issued only after:
 1. the deposit exists on the institution’s core ledger, and  
 2. a trust chain of W3C Verifiable Credentials is verified  
    (NCUA → insured institution → member).
+
+**Product position:** a member should be able to **log into their credit union
+account, buy a CD as CDT, and hold certificate control in a browser wallet**
+(reference wallet: **Lace**, via CIP-30). The CU remains the front door; the
+wallet is the delivery surface for the digital certificate—not a substitute
+for the insured deposit on the issuer’s books.
 
 An **oracle** operated for the credit union co-signs minting. An on-chain
 **vault** enforces mature redemption and early withdrawal with the same simple
