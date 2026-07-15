@@ -153,6 +153,8 @@ async function mintCd(
     start,
     maturity: start + termMs,
     penaltyBps: PENALTY_BPS,
+    accountId: fromText("1"),
+    attestationHash: "ab".repeat(32),
   };
 
   console.log(`\nMinting CD "${depositId}"`);
@@ -171,6 +173,8 @@ async function mintCd(
     maturity: terms.maturity,
     penalty_bps: terms.penaltyBps,
     cdt_policy: scripts.policyId,
+    account_id: terms.accountId,
+    attestation_hash: terms.attestationHash,
   };
   const unit = toUnit(scripts.policyId, terms.depositId);
   const locked =

@@ -212,10 +212,17 @@ Terminal states: `settled`, `rejected`, `expired`, `cancelled`.
 | Spec message | Prototype today |
 | --- | --- |
 | ClaimLookup | `GET /api/claims/:ref` |
-| PresentmentRequest | `POST /api/presentments` (in-memory) |
-| SettlementAuth | **Not yet** — highest priority build |
-| BurnEvidence | Manual / pipeline redeem |
+| PresentmentRequest | `POST /api/presentments` (status `pending_burn`; durable Postgres) |
+| SettlementAuth | `POST /api/presentments/:id/authorize` → signed `cdt.settlement_auth.v1` |
+| Pin issuer settlement key | `GET /api/settlement/pubkey` |
+| BurnEvidence | `POST /api/presentments/:id/burn-evidence` `{ "txHash": "<64 hex>" }` |
+| BurnAccepted | `POST /api/presentments/:id/accept-burn` |
+| SettlementPayment | `POST /api/presentments/:id/settlement-payment` |
+| Durable registry | `presentments` table (UNIQUE burn_tx_hash) |
 | Payment-check | `POST /api/payment/verify` (merchant path; separate) |
+
+Hold-until-burn is the only supported policy: unrestricted cash only after
+`burn_accepted` (ops may place a hold earlier).
 
 ## 8. OpenAPI
 

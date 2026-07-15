@@ -63,3 +63,37 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_attestations_hash_unique
 ALTER TABLE attestations ADD COLUMN IF NOT EXISTS account_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE attestations ADD COLUMN IF NOT EXISTS attestation_hash TEXT NOT NULL DEFAULT '';
 
+-- Durable correspondent presentments (SettlementAuth / BurnEvidence pipeline).
+CREATE TABLE IF NOT EXISTS presentments (
+  id SERIAL PRIMARY KEY,
+  deposit_id TEXT NOT NULL,
+  transaction_id INT REFERENCES transactions,
+  status TEXT NOT NULL,
+  presenting_cu_name TEXT NOT NULL,
+  issuer_name TEXT NOT NULL,
+  walk_in_name TEXT NOT NULL,
+  principal_cents BIGINT NOT NULL,
+  cash_out_cents BIGINT NOT NULL,
+  cash_out_mode TEXT NOT NULL,
+  product_name TEXT NOT NULL,
+  rate_bps INT NOT NULL,
+  holder_did TEXT NOT NULL,
+  holder_wallet TEXT NOT NULL,
+  settlement TEXT NOT NULL DEFAULT '',
+  next_steps JSONB NOT NULL DEFAULT '[]',
+  settlement_instructions TEXT,
+  settlement_auth JSONB,
+  burn_tx_hash TEXT,
+  burn_mode TEXT,
+  settlement_payment JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_presentments_burn_tx
+  ON presentments (burn_tx_hash)
+  WHERE burn_tx_hash IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_presentments_deposit ON presentments (deposit_id);
+CREATE INDEX IF NOT EXISTS idx_presentments_status ON presentments (status);
+

@@ -179,8 +179,11 @@ export interface PresentmentRequest {
 
 export type PresentmentStatus =
   | "pending_burn"
-  | "cash_advanced_pending_settlement"
+  | "authorized"
+  | "burn_submitted"
+  | "burn_accepted"
   | "settled"
+  | "cash_advanced_pending_settlement"
   | "rejected";
 
 export interface PresentmentDto {
@@ -203,6 +206,34 @@ export interface PresentmentDto {
   nextSteps: string[];
   /** Detailed burn-before-cash instructions (desk). */
   settlementInstructions?: string;
+  /** Issuer-signed SettlementAuth (cdt.settlement_auth.v1). */
+  settlementAuth?: SignedSettlementAuthDto;
+  burnTxHash?: string;
+  burnMode?: string;
+  settlementPayment?: {
+    amountCents: number;
+    rail: string;
+    traceId: string;
+    paidAt: string;
+  };
+}
+
+export interface SignedSettlementAuthDto {
+  payload: {
+    schema: "cdt.settlement_auth.v1";
+    presentment_id: string;
+    deposit_id: string;
+    redeemer_institution_id: string;
+    cash_out_cents: number;
+    cash_out_mode: "mature" | "early";
+    burn_required: true;
+    issued_at: string;
+    expires_at: string;
+    issuer_institution_id: string;
+  };
+  signature: string;
+  algorithm: "Ed25519";
+  publicKeySpkiBase64: string;
 }
 
 /**
