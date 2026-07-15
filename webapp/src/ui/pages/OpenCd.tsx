@@ -12,7 +12,6 @@ import { money, percentFromBps, shortHash, termLabel } from "../format.js";
 import {
   detectCip30Wallets,
   type Cip30WalletApi,
-  type DetectedWallet,
 } from "../cip30.js";
 
 type WizardStep = "cip" | "product" | "disclosures" | "confirm" | "track";
@@ -99,8 +98,8 @@ export function OpenCd({ member }: { member: MemberDto }) {
   const [trackedCd, setTrackedCd] = useState<CdDto | null>(null);
   const [trackError, setTrackError] = useState<string | null>(null);
 
-  /** Lace / CIP-30 destination wallet for certificate control. */
-  const [wallets, setWallets] = useState<DetectedWallet[]>([]);
+  /** Lace / CIP-30 destination wallet for certificate control (ids only — no plugin objects in state). */
+  const [walletOptions, setWalletOptions] = useState<Array<{ id: string; label: string }>>([]);
   const [walletId, setWalletId] = useState("lace");
   const [laceAddress, setLaceAddress] = useState<string | null>(null);
   const [laceNetworkId, setLaceNetworkId] = useState<number | null>(null);
@@ -109,10 +108,17 @@ export function OpenCd({ member }: { member: MemberDto }) {
   const [walletConfirmed, setWalletConfirmed] = useState(false);
 
   const refreshWallets = useCallback(() => {
-    const list = detectCip30Wallets();
-    setWallets(list);
-    if (list.some((w) => w.id === "lace")) setWalletId("lace");
-    else if (list[0]) setWalletId(list[0].id);
+    try {
+      const list = detectCip30Wallets();
+      setWalletOptions(list.map((w) => ({ id: w.id, label: w.label })));
+      if (list.some((w) => w.id === "lace")) setWalletId("lace");
+      else if (list[0]) setWalletId(list[0].id);
+    } catch (err) {
+      setWalletError(
+        `Wallet detection failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      setWalletOptions([]);
+    }
   }, []);
 
   useEffect(() => {
@@ -326,8 +332,8 @@ export function OpenCd({ member }: { member: MemberDto }) {
             <label>
               Wallet
               <select value={walletId} onChange={(e) => setWalletId(e.target.value)}>
-                {wallets.length === 0 && <option value="lace">Lace (not detected)</option>}
-                {wallets.map((w) => (
+                {walletOptions.length === 0 && <option value="lace">Lace (not detected)</option>}
+                {walletOptions.map((w) => (
                   <option key={w.id} value={w.id}>
                     {w.label}
                     {w.id === "lace" ? " ★" : ""}
@@ -375,7 +381,10 @@ export function OpenCd({ member }: { member: MemberDto }) {
               type="checkbox"
               checked={walletConfirmed}
               disabled={!laceAddress}
-              onChange={(e) => setWalletConfirmed(e.currentTarget.checked)}
+              onChange={(e) => {
+                const next = e.target.checked;
+                setWalletConfirmed(next);
+              }}
             />
             <span>
               <strong>Deliver certificate control to this wallet</strong>
@@ -398,9 +407,13 @@ export function OpenCd({ member }: { member: MemberDto }) {
                   <input
                     type="checkbox"
                     checked={Boolean(checked[c.id])}
-                    onChange={(e) =>
-                      setChecked((prev) => ({ ...prev, [c.id]: e.currentTarget.checked }))
-                    }
+                    onChange={(e) => {
+                      // Read the value during the event — never inside a setState
+                      // updater (React may re-run updaters; currentTarget is then null
+                      // and throws → blank page).
+                      const next = e.target.checked;
+                      setChecked((prev) => ({ ...prev, [c.id]: next }));
+                    }}
                   />
                   <span>
                     <strong>{c.label}</strong>
@@ -526,7 +539,7 @@ export function OpenCd({ member }: { member: MemberDto }) {
             <input
               type="checkbox"
               checked={acceptedDisclosures}
-              onChange={(e) => setAcceptedDisclosures(e.currentTarget.checked)}
+              onChange={(e) => setAcceptedDisclosures(e.target.checked)}
             />
             <span>
               <strong>Member (or authorized staff) acknowledges disclosures</strong>
