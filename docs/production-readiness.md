@@ -84,16 +84,16 @@ Terminate TLS at a reverse proxy; never expose Postgres or the API on a public i
 | **Settlement audit** | Immutable transition log | **Done:** `presentment_events` + `GET /api/presentments/:id/events` |
 | **SettlementAuth binding** | Auth must match claim + stay valid | **Done:** deposit_id match + signature/TTL re-check on burn + accept |
 | **On-chain burn validation** | Prove burn tx burns deposit CDT | **Done (Koios):** `BURN_VALIDATE_MODE=strict` + `CHAIN_PROVIDER=koios-preview`; optional `CDT_POLICY_ID` |
-| **ACH/FedNow integration** | SettlementPayment is an audit record | **HTTP adapter:** `SETTLEMENT_RAIL=http` + `SETTLEMENT_ACH_URL` (+ optional token); mock/log/none remain |
+| **ACH/FedNow integration** | SettlementPayment is an audit record | **HTTP adapter:** `SETTLEMENT_RAIL=http` + `SETTLEMENT_ACH_URL`; mock/log/none remain |
 | **Oracle VC path** | Fail-closed / accept-all | **credentials mode** enrolls bank DIDs via `@cdt/credentials` (`BankCredentialDirectory`) |
 | **mTLS / institutional JWT** | Spec inter-CU auth | **Dual API keys + HS256 JWT:** `CDT_JWT_SECRET`, `POST /api/auth/token`, Bearer role claims; dual keys still supported |
 | **HSM / dual control** | Mint oracle and settlement keys | **Dual-control SettlementAuth cosign** (`SETTLEMENT_DUAL_CONTROL`); oracle **remote signer** (`ORACLE_SIGNING_PROVIDER=remote`) + PKCS#11 stub |
-| **Professional SC audit** | Aiken validators + economic model | Open |
-| **One-shot on-chain deposit registry** | Global uniqueness | **Off-chain pilot:** `deposit_registry` (`attested→minted→burned`) + `GET /api/deposit-registry/:id`; on-chain still open |
+| **Professional SC audit** | Aiken validators + economic model | **Pre-audit package:** `docs/ops/sc-audit-brief.md` (engagement not executed) |
+| **One-shot on-chain deposit registry** | Global uniqueness | **Off-chain done** + **design + Aiken scaffold** (`docs/ops/on-chain-deposit-registry.md`, `deposit_registry.ak`); mint co-spend open |
 | **Key ceremony / dual control** | Ops process + PEMs | **Done:** `docs/ops/key-ceremony.md` + `npm run keygen:pilot` |
 | **Settlement idempotency** | Safe retries | **Done:** `Idempotency-Key` on settlement-payment |
-| **Mobile wallet sign / QR** | Member signs redeem/burn on phone | **Done:** `POST/GET /api/sign-requests`, `#/sign` QR claim URL (CBOR server-side; not Bluetooth) |
-| **IDV / CIP systems** | Desk checkboxes remain demo | Open |
+| **Mobile wallet sign / QR** | Member signs redeem/burn on phone | **Done:** sign-requests + `#/sign` + wallet deep-link catalog |
+| **IDV / CIP systems** | Desk checkboxes remain demo | **Adapter:** `CDT_IDV_MODE=mock\|http`, `POST /api/idv/check`, optional `CDT_IDV_REQUIRE=1` on presentments |
 | **OpenAPI** | Machine-readable settlement API | **Done:** `docs/openapi/settlement-v1.yaml`, `GET /api/openapi.json` |
 
 ---

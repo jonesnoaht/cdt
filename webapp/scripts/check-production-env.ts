@@ -82,10 +82,32 @@ if (isProd) {
     warn("CDT_VC_MODE", "default fail_closed — ensure credentials mode for pilot mint");
   }
 
-  if (env.SETTLEMENT_RAIL === "none" || env.SETTLEMENT_RAIL === "disabled") {
+  if (env.SETTLEMENT_RAIL === "http" || env.SETTLEMENT_RAIL === "ach") {
+    if (!env.SETTLEMENT_ACH_URL) {
+      err("SETTLEMENT_ACH_URL", "Required when SETTLEMENT_RAIL=http");
+    } else {
+      ok("SETTLEMENT_RAIL", "http adapter configured");
+    }
+  } else if (env.SETTLEMENT_RAIL === "none" || env.SETTLEMENT_RAIL === "disabled") {
     warn("SETTLEMENT_RAIL", "disabled — SettlementPayment will refuse");
   } else if (!env.SETTLEMENT_RAIL || env.SETTLEMENT_RAIL === "mock") {
     warn("SETTLEMENT_RAIL", "mock ACH only — not a real payment rail");
+  }
+
+  if (env.CDT_IDV_MODE === "http" && !env.CDT_IDV_URL) {
+    err("CDT_IDV_URL", "Required when CDT_IDV_MODE=http");
+  } else if (env.CDT_IDV_MODE === "http") {
+    ok("CDT_IDV_MODE", "http provider");
+  } else if (env.CDT_IDV_REQUIRE === "1" && (env.CDT_IDV_MODE || "mock") === "mock") {
+    warn("CDT_IDV_REQUIRE", "enforced with mock IDV — wire CDT_IDV_MODE=http for production CIP");
+  }
+
+  if (env.IDENTUS_MODE === "http" && !env.IDENTUS_BASE_URL) {
+    err("IDENTUS_BASE_URL", "Required when IDENTUS_MODE=http");
+  } else if (env.IDENTUS_MODE === "http") {
+    ok("IDENTUS_MODE", "http");
+  } else {
+    warn("IDENTUS_MODE", env.IDENTUS_MODE || "mock — map HttpIdentusAgent to live agent for production");
   }
 
   if (env.BURN_VALIDATE_MODE === "off") {

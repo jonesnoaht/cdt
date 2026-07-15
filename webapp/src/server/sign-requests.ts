@@ -14,6 +14,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import QRCode from "qrcode";
+import { buildWalletDeepLinks, deepLinkTemplateForBrand, type WalletBrand } from "./wallet-deeplinks.js";
 
 export type SignRequestPurpose =
   | "redeem"
@@ -38,6 +39,13 @@ export interface SignRequestDto {
   claimUrl: string;
   /** Optional wallet deep-link wrapper. */
   deepLink?: string;
+  /** All known wallet open options for this claim URL. */
+  walletLinks?: Array<{
+    brand: string;
+    label: string;
+    url: string | null;
+    notes?: string;
+  }>;
   /** Data-URL PNG QR of claimUrl. */
   qrDataUrl: string;
   requiredSignerHint?: string;
@@ -61,6 +69,8 @@ export interface CreateSignRequestInput {
   /** TTL ms (default 15 min). */
   ttlMs?: number;
   deepLinkTemplate?: string;
+  /** Prefer a built-in wallet brand template when deepLinkTemplate omitted. */
+  walletBrand?: WalletBrand;
 }
 
 function normalizeHex(hex: string): string {
@@ -93,9 +103,13 @@ export class SignRequestStore {
     const claimUrl = base.includes("#")
       ? `${base}/sign/${id}`
       : `${base}/#/sign/${id}`;
-    const deepLink = input.deepLinkTemplate
-      ? input.deepLinkTemplate.replace("{url}", encodeURIComponent(claimUrl)).replace("{id}", id)
+    const template =
+      input.deepLinkTemplate ??
+      (input.walletBrand ? deepLinkTemplateForBrand(input.walletBrand) : undefined);
+    const deepLink = template
+      ? template.replace("{url}", encodeURIComponent(claimUrl)).replace("{id}", id)
       : undefined;
+    const walletLinks = buildWalletDeepLinks(claimUrl);
     const qrDataUrl = await QRCode.toDataURL(claimUrl, {
       errorCorrectionLevel: "M",
       margin: 2,
@@ -114,6 +128,7 @@ export class SignRequestStore {
       cborHashHex: hashHex(cborHex),
       claimUrl,
       deepLink,
+      walletLinks,
       qrDataUrl,
       requiredSignerHint: input.requiredSignerHint,
       expiresAt: new Date(now + ttl).toISOString(),

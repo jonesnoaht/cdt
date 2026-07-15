@@ -20,6 +20,7 @@ type SignDto = {
   cborHashHex: string;
   claimUrl: string;
   deepLink?: string;
+  walletLinks?: Array<{ brand: string; label: string; url: string | null; notes?: string }>;
   qrDataUrl: string;
   requiredSignerHint?: string;
   expiresAt: string;
@@ -154,6 +155,18 @@ export function SignRequestPage({ requestId }: { requestId?: string }) {
                 <p>
                   <a href={row.deepLink}>Open wallet deep link</a>
                 </p>
+              )}
+              {row.walletLinks && row.walletLinks.length > 0 && (
+                <ul className="wallet-links">
+                  {row.walletLinks
+                    .filter((w) => w.url)
+                    .map((w) => (
+                      <li key={w.brand}>
+                        <a href={w.url!}>{w.label}</a>
+                        {w.notes ? <span className="muted"> — {w.notes}</span> : null}
+                      </li>
+                    ))}
+                </ul>
               )}
             </div>
             <details>
