@@ -186,7 +186,7 @@ Issuer validates on-chain (or via trusted indexer): burn of exactly one CDT for
 
 ## 5. Presentment state machine
 
-```
+```text
 quoted
   → authorized          (SettlementAuth issued)
   → cash_credited       (Redeemer disbursed; optional)

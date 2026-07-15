@@ -28,7 +28,7 @@ credit or cash**, then **settle with the issuing CU** after the token is
 **burned** so it cannot be paid twice. This is a **correspondent presentment**
 model—not a crypto exchange.
 
-```
+```text
 Member → Redeeming CU (CIP + credit) → Issuer (verify + settle) → Burn CDT
 ```
 

@@ -41,7 +41,7 @@ credit union** can, under contract:
 3. Receive **settlement** from the issuer after the CDT is **burned** (or
    cancelled under issuer recovery) so the claim cannot be cashed twice.
 
-**The ask of pilot partners**
+### The ask of pilot partners
 
 | Partner role | Commitment |
 | --- | --- |
@@ -90,7 +90,7 @@ targets the certificate niche specifically.
 
 ### 3.3 Roles
 
-```
+```text
 ┌─────────────┐     presentment      ┌─────────────┐
 │  Redeeming  │ ──────────────────►  │   Issuing   │
 │     CU      │ ◄──────────────────  │     CU      │
@@ -329,7 +329,7 @@ Pilot partners are asked to:
 **Author:** Noah Jones  
 **Package:** `docs/network/` in the CDT repository  
 
-**Immediate next steps**
+### Immediate next steps
 
 1. Choose issuer + redeemer seats.  
 2. Redline bilateral MOU.  

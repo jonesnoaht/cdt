@@ -53,7 +53,7 @@ by itself retitle NCUSIF coverage.
 
 ## Bootstrap sequence (summary)
 
-```
+```text
 Phase 0  Paper MOU (2 CUs) + manual burn + wire
 Phase 1  Bilateral API + ACH + member T&Cs
 Phase 2  Multilateral Master Agreement + CUSO hub

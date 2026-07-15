@@ -426,7 +426,7 @@ Reduces trivial replay of the same challenge; short-lived signed checks.
 
 ## 8. On-chain notes (for future auditor)
 
-**Strengths**
+### Strengths
 
 - Oracle required for mint.  
 - Vault datum terms bound at mint.  
@@ -434,7 +434,7 @@ Reduces trivial replay of the same challenge; short-lived signed checks.
 - Burn of exactly one matching token.  
 - Single vault input constraint.
 
-**Questions for specialist audit**
+### Questions for specialist audit
 
 - All min-ADA / multi-asset output edge cases.  
 - Validity interval malleability with owner-signed txs.  

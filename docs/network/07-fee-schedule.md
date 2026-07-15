@@ -44,7 +44,7 @@ conflated with NCUA insurance or “crypto gas” without clarity.
 
 ## 5. Settlement amount definition
 
-```
+```text
 Cash-Out Amount = mature_payout  OR  early_payout   (per product math)
 Settlement to Redeemer = Cash-Out Amount − Issuer_presentment_fee
                          (+/− agreed adjustments)

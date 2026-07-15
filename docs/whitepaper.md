@@ -1,4 +1,5 @@
 # Certificate of Deposit Token (CDT)
+
 ## Whitepaper
 
 **Version:** 1.0  
@@ -123,7 +124,7 @@ deposit.
 
 ### 3.1 Lifecycle (issuing credit union)
 
-```
+```text
 Member CIP/KYC ──► Core books CD funding deposit
                          │
                          ▼
@@ -270,7 +271,7 @@ unique constraints).
 
 ### 6.1 Trust chain
 
-```
+```text
 NCUA (trusted root DID)
   └─ InsuredInstitutionCredential ──► Credit union DID
                                         └─ AccountHolderCredential ──► Member DID
@@ -354,7 +355,7 @@ transaction.
 Let `YEAR_MS = 31_557_600_000` (Julian year in ms). All values are integers
 with floor division:
 
-```
+```text
 full_interest = principal * rate_bps * (maturity - start) / (10_000 * YEAR_MS)
 accrued(t)    = principal * rate_bps * (clamp(t, start, maturity) - start)
                 / (10_000 * YEAR_MS)

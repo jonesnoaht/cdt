@@ -1,10 +1,11 @@
 # 02 — Bilateral Pilot Memorandum of Understanding
 
 **Document type:** Non-binding / partially binding pilot MOU template  
-**Parties:**  
+**Parties:**
+
 - **Issuer:** _________________ Credit Union (“Issuer”)  
 - **Redeemer:** _________________ Credit Union (“Redeemer”)  
-- **Technology partner (optional):** CDT Labs / project team (“Operator”)  
+- **Technology partner (optional):** CDT Labs / project team (“Operator”)
 
 **Status:** Template for negotiation — execute only after counsel review  
 **Pilot name:** CDT Settlement Pilot — [Year]

@@ -28,10 +28,10 @@ This does **not**:
 }
 ```
 
-4. If `ok: true`, verify `signedCheck.signature` over **canonical JSON**
+1. If `ok: true`, verify `signedCheck.signature` over **canonical JSON**
    (sorted keys) of `signedCheck.payload` using the pinned public key.  
-5. Optionally re-check via `POST /api/payment/verify-signature`.  
-6. Accept the payment only while `payload.expiresAtMs` is in the future.
+2. Optionally re-check via `POST /api/payment/verify-signature`.  
+3. Accept the payment only while `payload.expiresAtMs` is in the future.
 
 ## Payload fields (signed)
 
