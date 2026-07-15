@@ -2,9 +2,9 @@
 
 **Status:** Working prototype → production *path* (not production-certified)  
 **Date:** July 2026  
-**Related:** [security-audit.md](./security-audit.md) · [network/05-messaging-protocol.md](./network/05-messaging-protocol.md) · [compliance.md](./compliance.md)
+**Related:** [Operator manual](./manual.md) · [security-audit.md](./security-audit.md) · [network/05-messaging-protocol.md](./network/05-messaging-protocol.md) · [compliance.md](./compliance.md) · [docs index](./README.md)
 
-This document tracks what moved from “demo-only” toward a deployable pilot, and what remains for a production CU program.
+This document tracks what moved from “demo-only” toward a deployable pilot, and what remains for a production CU program. For day-to-day runbooks and desk flows, prefer the **[operator manual](./manual.md)**.
 
 ---
 
