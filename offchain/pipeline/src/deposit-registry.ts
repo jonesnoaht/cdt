@@ -92,3 +92,21 @@ export async function registryAssertMintable(
     throw err;
   }
 }
+
+/**
+ * When ONCHAIN_REGISTRY_REQUIRED=1, refuse mint unless a registry UTxO plan
+ * is supplied. Full Lucid co-spend is wired by the builder using
+ * `@cdt/txlib` `planRegistryMintCospend`.
+ */
+export function assertOnchainRegistryPlan(opts: {
+  required: boolean;
+  plan: unknown | null | undefined;
+  depositId: string;
+}): void {
+  if (!opts.required) return;
+  if (!opts.plan) {
+    throw new Error(
+      `ONCHAIN_REGISTRY_REQUIRED: mint of deposit ${opts.depositId} needs a registry co-spend plan (planRegistryMintCospend + registry UTxO).`,
+    );
+  }
+}

@@ -40,3 +40,9 @@ export {
   type HttpIdentusAgentOptions,
 } from "./identus.js";
 export { createTlsFetch, tlsFetchFromEnv, type FetchLike, type TlsFetchOptions } from "./tls-fetch.js";
+export {
+  WalletPresentationStore,
+  walletPresentationStoreFromEnv,
+  type PresentationChallenge,
+  type PresentationSessionComplete,
+} from "./wallet-presentation.js";

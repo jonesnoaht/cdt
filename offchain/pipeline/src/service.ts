@@ -294,8 +294,21 @@ export class IssuanceService {
     const assetName = fromText(depositId);
     const unit = toUnit(chain.scripts.policyId, assetName);
 
-    const { registryAssertMintable } = await import("./deposit-registry.js");
+    const { registryAssertMintable, assertOnchainRegistryPlan } = await import(
+      "./deposit-registry.js",
+    );
     await registryAssertMintable(this.pool, depositId);
+    // Fail-closed gate when on-chain registry co-spend is mandated (pilot).
+    // Full Lucid spend attaches planRegistryMintCospend redeemer+nextDatum.
+    assertOnchainRegistryPlan({
+      required:
+        process.env.ONCHAIN_REGISTRY_REQUIRED === "1" ||
+        process.env.ONCHAIN_REGISTRY_REQUIRED === "true",
+      plan: process.env.ONCHAIN_REGISTRY_UTXO_REF
+        ? { utxoRef: process.env.ONCHAIN_REGISTRY_UTXO_REF }
+        : null,
+      depositId,
+    });
 
     if (
       !verifyAttestation(

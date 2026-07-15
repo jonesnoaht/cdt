@@ -845,6 +845,59 @@ export function createApp(options: AppOptions): Hono {
     return c.json(result);
   });
 
+  /**
+   * Create a mobile sign-request for the burn tx of an authorized presentment.
+   * Body: { cborHex, publicBaseUrl?, purpose? } — desk/pipeline supplies unsigned CBOR.
+   */
+  app.post("/api/presentments/:id/sign-burn", async (c) => {
+    const id = parseIdParam(c.req.param("id"));
+    if (id === null) return c.json({ error: "Invalid presentment id." }, 400);
+    const row = await presentments.get(id);
+    if (!row) return c.json({ error: "Presentment not found." }, 404);
+    if (row.status !== "authorized" && row.status !== "burn_submitted") {
+      return c.json(
+        {
+          error: `Presentment status ${row.status} cannot start burn signing (need authorized).`,
+        },
+        422,
+      );
+    }
+    let body: {
+      cborHex?: string;
+      publicBaseUrl?: string;
+      purpose?: string;
+      walletBrand?: string;
+    };
+    try {
+      body = (await c.req.json()) as typeof body;
+    } catch {
+      return c.json({ error: "Request body must be JSON." }, 400);
+    }
+    if (!body.cborHex) {
+      return c.json(
+        { error: "cborHex required (unsigned burn/redeem transaction)." },
+        400,
+      );
+    }
+    const publicBaseUrl =
+      body.publicBaseUrl?.trim() ||
+      `${c.req.header("x-forwarded-proto") ?? "http"}://${c.req.header("host") ?? "localhost"}/#`;
+    try {
+      const dto = await signRequests.create({
+        purpose: (body.purpose as "burn" | "redeem" | "early_withdraw") || "burn",
+        cborHex: body.cborHex,
+        depositId: row.depositId ?? undefined,
+        presentmentId: id,
+        description: `Burn CDT for presentment ${id} (deposit ${row.depositId ?? "?"})`,
+        publicBaseUrl,
+        walletBrand: body.walletBrand as import("./wallet-deeplinks.js").WalletBrand | undefined,
+      });
+      return c.json(dto, 201);
+    } catch (err) {
+      return c.json({ error: String(err) }, 400);
+    }
+  });
+
   /** Record SettlementPayment after core close. */
   app.post("/api/presentments/:id/settlement-payment", async (c) => {
     const id = parseIdParam(c.req.param("id"));

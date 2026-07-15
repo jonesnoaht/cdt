@@ -8,7 +8,7 @@
  *   CDT_TLS_REJECT_UNAUTHORIZED=0          — lab only
  */
 import { readFileSync, existsSync } from "node:fs";
-import https from "node:https";
+import * as https from "node:https";
 import { URL } from "node:url";
 
 export type FetchLike = (
@@ -91,7 +91,7 @@ export function createTlsFetch(opts: TlsFetchOptions = {}): FetchLike {
             const rh = new Headers();
             for (const [k, v] of Object.entries(res.headers)) {
               if (v === undefined) continue;
-              rh.set(k, Array.isArray(v) ? v.join(", ") : v);
+              rh.set(k, Array.isArray(v) ? v.join(", ") : String(v));
             }
             resolve(
               new Response(buf, {

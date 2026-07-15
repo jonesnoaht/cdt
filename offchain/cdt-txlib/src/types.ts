@@ -57,3 +57,29 @@ export const MintRedeemerSchema = Data.Enum([
 ]);
 export type MintRedeemer = Data.Static<typeof MintRedeemerSchema>;
 export const MintRedeemer = MintRedeemerSchema as unknown as MintRedeemer;
+
+/**
+ * On-chain deposit registry datum (see deposit_registry.ak).
+ *
+ * Field order: admin (28-byte VKH), used (list of deposit_id bytearrays).
+ */
+export const DepositRegistryDatumSchema = Data.Object({
+  admin: Data.Bytes({ minLength: 28, maxLength: 28 }),
+  used: Data.Array(Data.Bytes()),
+});
+export type DepositRegistryDatum = Data.Static<typeof DepositRegistryDatumSchema>;
+export const DepositRegistryDatum =
+  DepositRegistryDatumSchema as unknown as DepositRegistryDatum;
+
+/**
+ * Redeemer: RegisterDeposit { deposit_id }.
+ * Lucid: single-constructor Aiken redeemer as nested Object (not Data.Enum).
+ */
+export const DepositRegistryRedeemerSchema = Data.Object({
+  RegisterDeposit: Data.Object({ deposit_id: Data.Bytes() }),
+});
+export type DepositRegistryRedeemer = Data.Static<
+  typeof DepositRegistryRedeemerSchema
+>;
+export const DepositRegistryRedeemer =
+  DepositRegistryRedeemerSchema as unknown as DepositRegistryRedeemer;
