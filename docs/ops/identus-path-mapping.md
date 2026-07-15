@@ -14,7 +14,7 @@
 
 ### Request / response shapes
 
-**Verify**
+#### Verify
 
 ```json
 // POST body
@@ -32,7 +32,7 @@
 { "ok": false, "reason": "…" }
 ```
 
-**Issue account-holder**
+#### Issue account-holder
 
 ```json
 // POST body
@@ -47,7 +47,7 @@
 { "data": { "credential": { /* W3C VC */ } } }
 ```
 
-**Health**
+#### Health
 
 ```json
 { "ready": true }
