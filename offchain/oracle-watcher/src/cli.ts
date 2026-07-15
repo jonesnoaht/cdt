@@ -3,25 +3,21 @@
  * Postgres.
  *
  * Environment:
- *   PGHOST / PGPORT / PGUSER / PGPASSWORD / PGDATABASE  — bank database
- *   POLL_INTERVAL_MS                                    — poll interval (default 5000)
- *   ORACLE_SIGNING_KEY_PEM                              — Ed25519 private key, PKCS#8 PEM.
- *                                                         Required unless ALLOW_EPHEMERAL_ORACLE_KEY=1.
- *   ALLOW_EPHEMERAL_ORACLE_KEY=1                        — generate a throwaway key (lab only).
- *   CDT_VC_MODE                                         — fail_closed | accept_all | credentials
- *   CDT_ORACLE_ACCEPT_ALL_VC=1                          — alias for accept_all (LAB ONLY)
- *   CDT_TRUSTED_ROOT_DID                                — NCUA / root DID for credentials mode
- *   CDT_PRESENTATION_DIR                                — directory of VP JSON files (credentials mode)
+ *   PGHOST / PGPORT / PGUSER / PGPASSWORD / PGDATABASE
+ *   POLL_INTERVAL_MS
+ *   ORACLE_SIGNING_KEY_PEM          — required unless ALLOW_EPHEMERAL_ORACLE_KEY=1
+ *   CDT_VC_MODE                     — fail_closed | accept_all | credentials
+ *   CDT_ORACLE_ACCEPT_ALL_VC=1      — alias for accept_all (LAB ONLY)
  *
- * SECURITY: Never set accept_all outside a lab. Prefer credentials mode with
- * pre-issued presentations or a future Identus agent.
+ * credentials mode enrolls every accounts.did with a full NCUA→CU→member
+ * chain (@cdt/credentials) and verifies a fresh presentation per poll.
  */
 import { createPublicKey } from "node:crypto";
 import {
-  buildVerifyPresentationHook,
-  PresentationDirectory,
-  vcModeFromEnv,
-} from "./credentials-hook.js";
+  BankCredentialDirectory,
+  verifyHookForMode,
+} from "./bank-credentials.js";
+import { vcModeFromEnv } from "./credentials-hook.js";
 import { generateEd25519KeyPair, privateKeyFromPem, publicKeyToBase64 } from "./keys.js";
 import { createPool, loadConfig } from "./config.js";
 import { OracleWatcher } from "./watcher.js";
@@ -50,22 +46,23 @@ async function main(): Promise<void> {
   );
 
   const mode = vcModeFromEnv();
-  const trustedRootDid = process.env.CDT_TRUSTED_ROOT_DID || "did:cdt:ncua";
-  const directory = new PresentationDirectory();
-  if (process.env.CDT_PRESENTATION_DIR) {
-    const n = directory.loadDir(process.env.CDT_PRESENTATION_DIR);
-    console.log(`oracle-watcher: loaded ${n} presentations from ${process.env.CDT_PRESENTATION_DIR}`);
-  }
-  console.log(`oracle-watcher: VC mode = ${mode}`);
-
-  const verifyPresentation = buildVerifyPresentationHook({
-    mode,
-    trustedRootDid,
-    directory,
-    log: (m) => console.warn(m),
-  });
-
   const pool = createPool(config.pg);
+
+  let directory: BankCredentialDirectory | undefined;
+  if (mode === "credentials") {
+    directory = new BankCredentialDirectory();
+    const n = await directory.enrollFromAccounts(pool);
+    console.log(
+      `oracle-watcher: CDT_VC_MODE=credentials — enrolled ${n} new member DID(s) (total ${directory.size()}); root=${directory.trustedRootDid()}`,
+    );
+  } else {
+    console.log(`oracle-watcher: VC mode = ${mode}`);
+  }
+
+  const verifyPresentation = verifyHookForMode(mode, directory, (m) =>
+    console.warn(m),
+  );
+
   const watcher = new OracleWatcher({
     pool,
     oraclePrivateKey: privateKey,
@@ -73,17 +70,7 @@ async function main(): Promise<void> {
     verifyPresentation,
     onAttested: (attestation) => {
       console.log(
-        `oracle-watcher: attestation ready for minting deposit=${attestation.payload.deposit_id} account=${attestation.payload.account_id} hash=${attestation.attestation_hash_hex}:\n${JSON.stringify(
-          {
-            deposit_id: attestation.payload.deposit_id,
-            account_id: attestation.payload.account_id,
-            owner_did: attestation.payload.owner_did,
-            attestation_hash_hex: attestation.attestation_hash_hex,
-            algorithm: attestation.algorithm,
-          },
-          null,
-          2,
-        )}`,
+        `oracle-watcher: attestation ready deposit=${attestation.payload.deposit_id} account=${attestation.payload.account_id} hash=${attestation.attestation_hash_hex}`,
       );
     },
   });

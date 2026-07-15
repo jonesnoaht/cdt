@@ -48,3 +48,7 @@ export {
   vcModeFromEnv,
   type VcMode,
 } from './credentials-hook.js';
+export {
+  BankCredentialDirectory,
+  verifyHookForMode,
+} from './bank-credentials.js';

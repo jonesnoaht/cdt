@@ -115,6 +115,8 @@ export interface AppOptions {
   burnValidateMode?: "off" | "soft" | "strict";
   /** Optional CDT mint policy id (hex) for burn matching. */
   cdtPolicyId?: string;
+  /** Optional settlement payment rail. */
+  settlementRail?: import("./settlement-rail.js").SettlementRail;
 }
 
 interface MemberIdentity {
@@ -158,6 +160,7 @@ export function createApp(options: AppOptions): Hono {
         policyId: options.cdtPolicyId,
         fetchImpl: options.fetchImpl,
       },
+      settlementRail: options.settlementRail,
     });
   void presentments.init();
   const paymentOracle = options.paymentOracle ?? new PaymentOracle();
@@ -577,8 +580,8 @@ export function createApp(options: AppOptions): Hono {
     } catch {
       return c.json({ error: "Request body must be JSON." }, 400);
     }
-    if (typeof body.amountCents !== "number" || typeof body.rail !== "string" || typeof body.traceId !== "string") {
-      return c.json({ error: "amountCents, rail, and traceId are required." }, 400);
+    if (typeof body.amountCents !== "number") {
+      return c.json({ error: "amountCents is required (rail/traceId optional — mock ACH fills them)." }, 400);
     }
     const result = await presentments.recordSettlementPayment(
       id,
