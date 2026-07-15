@@ -31,3 +31,10 @@ export {
   type VerifyOptions,
   type VerifyResult,
 } from "./vc.js";
+export {
+  MockIdentusAgent,
+  HttpIdentusAgent,
+  UnconfiguredIdentusAgent,
+  createIdentusAgentFromEnv,
+  type IdentusAgent,
+} from "./identus.js";

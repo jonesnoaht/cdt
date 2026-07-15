@@ -35,6 +35,8 @@ const app = createApp({
   apiKey: config.allowOpenApi && !config.apiKey ? null : config.apiKey,
   allowOpenApi: config.allowOpenApi,
   paymentOracle,
+  burnValidateMode: config.burnValidateMode,
+  cdtPolicyId: config.cdtPolicyId,
 });
 
 // Serve the built UI when it exists (vite build → dist/ui), so the API

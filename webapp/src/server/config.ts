@@ -29,6 +29,10 @@ export interface ServerConfig {
   allowEphemeralPaymentOracle: boolean;
   /** Pinned mint-oracle SPKI (base64) for attestation verification endpoints. */
   mintOraclePubkeySpki: string | undefined;
+  /** Burn validation: off | soft | strict. */
+  burnValidateMode: "off" | "soft" | "strict";
+  /** Optional CDT policy id for burn asset matching. */
+  cdtPolicyId: string | undefined;
 }
 
 /**
@@ -61,5 +65,11 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
     allowEphemeralPaymentOracle:
       env.ALLOW_EPHEMERAL_PAYMENT_ORACLE === "1" || !isProd,
     mintOraclePubkeySpki: env.MINT_ORACLE_PUBKEY_SPKI || undefined,
+    burnValidateMode: (() => {
+      const raw = (env.BURN_VALIDATE_MODE || "").toLowerCase();
+      if (raw === "off" || raw === "soft" || raw === "strict") return raw;
+      return env.CHAIN_PROVIDER === "koios-preview" ? "strict" : "off";
+    })(),
+    cdtPolicyId: env.CDT_POLICY_ID || undefined,
   };
 }

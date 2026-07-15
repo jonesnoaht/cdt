@@ -26,7 +26,24 @@ import {
   SettlementSigner,
   type SignedSettlementAuth,
 } from "./settlement-auth.js";
+import {
+  validateBurnTx,
+  type BurnValidateMode,
+  type BurnValidateResult,
+} from "./burn-validate.js";
 
+export interface PresentmentStoreOptions {
+  pool?: pg.Pool;
+  signer?: SettlementSigner;
+  /** On-chain burn validation settings (defaults: mode off). */
+  burnValidation?: {
+    mode: BurnValidateMode;
+    provider?: string;
+    koiosBaseUrl?: string;
+    policyId?: string;
+    fetchImpl?: typeof fetch;
+  };
+}
 function toAuthDto(auth: SignedSettlementAuth): SignedSettlementAuthDto {
   return {
     payload: auth.payload,
@@ -186,12 +203,22 @@ export class PresentmentStore {
   private byId = new Map<number, PresentmentDto>();
   private byClaim = new Map<string, number[]>();
   private durable = false;
+  private readonly pool?: pg.Pool;
+  private readonly signer: SettlementSigner;
+  private readonly burnValidation: PresentmentStoreOptions["burnValidation"];
 
-  constructor(
-    private readonly pool?: pg.Pool,
-    private readonly signer: SettlementSigner = new SettlementSigner(),
-  ) {}
-
+  constructor(poolOrOpts?: pg.Pool | PresentmentStoreOptions, signer?: SettlementSigner) {
+    if (poolOrOpts && typeof (poolOrOpts as pg.Pool).query === "function") {
+      this.pool = poolOrOpts as pg.Pool;
+      this.signer = signer ?? new SettlementSigner();
+      this.burnValidation = undefined;
+    } else {
+      const opts = (poolOrOpts as PresentmentStoreOptions | undefined) ?? {};
+      this.pool = opts.pool;
+      this.signer = opts.signer ?? signer ?? new SettlementSigner();
+      this.burnValidation = opts.burnValidation;
+    }
+  }
   /** Probe once whether the presentments table exists. */
   async init(): Promise<void> {
     if (!this.pool) return;
@@ -462,7 +489,10 @@ export class PresentmentStore {
 
   async acceptBurn(
     id: number,
-  ): Promise<PresentmentDto | { error: string; status: number }> {
+  ): Promise<
+    | (PresentmentDto & { burnValidation?: BurnValidateResult })
+    | { error: string; status: number; reasonCode?: string }
+  > {
     const p = await this.get(id);
     if (!p) return { error: "Presentment not found.", status: 404 };
     if (p.status !== "burn_submitted") {
@@ -471,15 +501,38 @@ export class PresentmentStore {
     if (!p.burnTxHash) {
       return { error: "No burn tx hash on presentment.", status: 422 };
     }
-    return this.update(id, {
+
+    const depositId = p.depositId ?? String(p.transactionId);
+    const bv = this.burnValidation;
+    const validation = await validateBurnTx({
+      provider: bv?.provider,
+      koiosBaseUrl: bv?.koiosBaseUrl ?? "https://preview.koios.rest/api/v1",
+      txHash: p.burnTxHash,
+      depositId,
+      policyId: bv?.policyId,
+      mode: bv?.mode ?? "off",
+      fetchImpl: bv?.fetchImpl,
+    });
+
+    if (!validation.ok) {
+      return {
+        error: validation.reason,
+        status: validation.reasonCode === "TX_NOT_FOUND" ? 404 : 422,
+        reasonCode: validation.reasonCode,
+      };
+    }
+
+    const updated = await this.update(id, {
       status: "burn_accepted",
       nextSteps: [
-        "Burn accepted — issuer closes deposit on core.",
+        validation.onChain
+          ? `Burn accepted on-chain (${validation.burnedQuantity ?? "qty n/a"}). Issuer closes deposit on core.`
+          : "Burn accepted (lab / soft validation). Issuer closes deposit on core.",
         "Record SettlementPayment (ACH/wire) to complete.",
       ],
     });
+    return { ...updated, burnValidation: validation };
   }
-
   async recordSettlementPayment(
     id: number,
     payment: { amountCents: number; rail: string; traceId: string; paidAt?: string },
