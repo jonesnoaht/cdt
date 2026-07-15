@@ -2,10 +2,9 @@
  * CD status derivation and payout projection.
  *
  * A CD-funding deposit's lifecycle:
- *   pending  — transactions row exists, no attestation yet (oracle hasn't
- *              verified/signed it).
- *   active   — attestation exists and now < payload.maturity.
- *   matured  — attestation exists and now >= payload.maturity.
+ *   pending  — transactions row exists, no usable attestation yet.
+ *   active   — attestation (or desk-usable terms) and now < maturity.
+ *   matured  — attestation (or desk-usable terms) and now >= maturity.
  *
  * All projections are computed with @cdt/txlib's interest math (bigint,
  * floor division — identical to the on-chain validator) in lovelace, then
@@ -21,19 +20,33 @@ import {
   maturePayout,
 } from "./math.js";
 
-/** Shape of the oracle watcher's signed attestation payload (jsonb column). */
-interface SignedAttestationLike {
-  payload?: {
-    deposit_id?: unknown;
-    owner?: unknown;
-    principal?: unknown; // lovelace
-    rate_bps?: unknown;
-    start?: unknown; // epoch ms
-    maturity?: unknown; // epoch ms
-    penalty_bps?: unknown;
-    tx_hash?: unknown;
-  };
+/** Economic terms inside an oracle attestation payload. */
+interface AttestationTerms {
+  deposit_id?: unknown;
+  owner?: unknown;
+  principal?: unknown;
+  rate_bps?: unknown;
+  start?: unknown;
+  maturity?: unknown;
+  penalty_bps?: unknown;
   tx_hash?: unknown;
+}
+
+/**
+ * Shape of the oracle watcher's signed attestation stored in jsonb.
+ * Supports both:
+ *   - full SignedAttestation: `{ payload: { start, maturity, ... }, ... }`
+ *   - flattened demo/lab rows: `{ start, maturity, ... }` at top level
+ */
+interface SignedAttestationLike {
+  payload?: AttestationTerms;
+  tx_hash?: unknown;
+  start?: unknown;
+  maturity?: unknown;
+  principal?: unknown;
+  rate_bps?: unknown;
+  penalty_bps?: unknown;
+  deposit_id?: unknown;
 }
 
 /** Row returned by CDS_SQL below (pg maps BIGINT to string). */
@@ -101,6 +114,25 @@ function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+/** Normalize nested vs flattened attestation JSON. */
+export function extractAttestationTerms(raw: unknown): AttestationTerms | null {
+  if (raw === null || typeof raw !== "object") return null;
+  const obj = raw as SignedAttestationLike;
+  if (obj.payload && typeof obj.payload === "object") {
+    return obj.payload;
+  }
+  // Flattened lab/demo rows (or payload already unwrapped).
+  if (
+    "start" in obj ||
+    "maturity" in obj ||
+    "principal" in obj ||
+    "deposit_id" in obj
+  ) {
+    return obj as AttestationTerms;
+  }
+  return null;
+}
+
 export function explorerUrlFor(txHash: string): string {
   return `https://preview.cardanoscan.io/transaction/${txHash}`;
 }
@@ -150,26 +182,40 @@ export function toCdDto(row: CdRow, nowMs: number, includeCurve = false): CdDto 
   const createdAtMs = row.created_at.getTime();
 
   const signed = (row.payload ?? null) as SignedAttestationLike | null;
-  const payload = signed?.payload;
-  const attStart = asFiniteInteger(payload?.start);
-  const attMaturity = asFiniteInteger(payload?.maturity);
-  const attPrincipal = asFiniteInteger(payload?.principal);
-  const attested =
-    row.deposit_id !== null && attStart !== null && attMaturity !== null && attMaturity >= attStart;
+  const terms = extractAttestationTerms(row.payload);
+  const attStart = asFiniteInteger(terms?.start);
+  const attMaturity = asFiniteInteger(terms?.maturity);
+  const attPrincipal = asFiniteInteger(terms?.principal);
 
-  // Effective terms: the signed attestation payload when attested, else the
-  // product terms with the deposit time as a provisional start. Clamps keep
+  // Attested if we have an attestation row. Prefer signed start/maturity;
+  // fall back to product schedule so desks work with lab seed payloads.
+  const hasAttestationRow = row.deposit_id !== null;
+  const scheduleFromPayload =
+    attStart !== null && attMaturity !== null && attMaturity >= attStart;
+  const attested = hasAttestationRow;
+
+  // Effective terms: the signed attestation payload when schedule present, else
+  // the product terms with the deposit time as a provisional start. Clamps keep
   // txlib's non-negativity / maturity >= start assertions unreachable even
   // for misconfigured product rows.
-  const rateBps = (attested ? asFiniteInteger(payload?.rate_bps) : null) ?? Math.max(0, row.rate_bps);
+  const rateBps =
+    (scheduleFromPayload ? asFiniteInteger(terms?.rate_bps) : null) ??
+    Math.max(0, row.rate_bps);
   const penaltyBps =
-    (attested ? asFiniteInteger(payload?.penalty_bps) : null) ?? Math.max(0, row.penalty_bps);
-  const startMs = attested ? attStart! : createdAtMs;
-  const maturityMs = attested
+    (scheduleFromPayload ? asFiniteInteger(terms?.penalty_bps) : null) ??
+    Math.max(0, row.penalty_bps);
+  const startMs = scheduleFromPayload
+    ? attStart!
+    : createdAtMs;
+  const maturityMs = scheduleFromPayload
     ? attMaturity!
     : createdAtMs + Math.max(0, row.term_months) * ESTIMATED_MS_PER_MONTH;
 
-  const status: CdStatus = !attested ? "pending" : nowMs < maturityMs ? "active" : "matured";
+  const status: CdStatus = !attested
+    ? "pending"
+    : nowMs < maturityMs
+      ? "active"
+      : "matured";
 
   // bigint terms for txlib (lovelace / epoch ms).
   const principal =
@@ -183,7 +229,9 @@ export function toCdDto(row: CdRow, nowMs: number, includeCurve = false): CdDto 
   const now = BigInt(Math.max(nowMs, startMs));
 
   const accruedToday = accrued(principal, rate, start, maturity, now);
-  const txHash = asString(signed?.tx_hash) ?? asString(payload?.tx_hash);
+  const txHash =
+    asString(signed?.tx_hash) ??
+    asString(terms?.tx_hash);
 
   return {
     transactionId: row.id,
@@ -199,7 +247,7 @@ export function toCdDto(row: CdRow, nowMs: number, includeCurve = false): CdDto 
     penaltyBps,
     txHash,
     explorerUrl: txHash ? explorerUrlFor(txHash) : null,
-    projectionEstimated: !attested,
+    projectionEstimated: !scheduleFromPayload,
     accruedTodayCents: lovelaceToCents(accruedToday),
     valueTodayCents: lovelaceToCents(principal + accruedToday),
     earlyPayoutTodayCents: lovelaceToCents(

@@ -29,10 +29,13 @@ import {
 import { PaymentOracle } from "./payment-oracle.js";
 import {
   isPublicPath,
-  publicOrAuthed,
-  rateLimit,
-  securityHeaders,
-} from "./security.js";
+    publicOrAuthed,
+    publicOrRoleAuthed,
+    rateLimit,
+    securityHeaders,
+    settlementRoleForPath,
+    type RoleKeys,
+  } from "./security.js";
 
 /**
  * Largest deposit (in cents) whose lovelace representation still fits in a
@@ -117,6 +120,10 @@ export interface AppOptions {
   cdtPolicyId?: string;
   /** Optional settlement payment rail. */
   settlementRail?: import("./settlement-rail.js").SettlementRail;
+  /** Issuer institutional key (SettlementAuth / accept / pay). */
+  issuerApiKey?: string;
+  /** Correspondent institutional key (presentment / burn-evidence). */
+  correspondentApiKey?: string;
 }
 
 interface MemberIdentity {
@@ -178,12 +185,27 @@ export function createApp(options: AppOptions): Hono {
     "/api/*",
     rateLimit({ windowMs: 60_000, max: 300 }),
   );
+  const roleKeys: RoleKeys = {
+    ...(apiKey ? { apiKey } : {}),
+    ...(options.issuerApiKey ? { issuerKey: options.issuerApiKey } : {}),
+    ...(options.correspondentApiKey
+      ? { correspondentKey: options.correspondentApiKey }
+      : {}),
+  };
   app.use("/api/*", async (c, next) => {
-    if (allowOpenApi && !apiKey) {
+    if (
+      allowOpenApi &&
+      !apiKey &&
+      !options.issuerApiKey &&
+      !options.correspondentApiKey
+    ) {
       return next();
     }
     if (isPublicPath(c.req.path)) {
       return next();
+    }
+    if (options.issuerApiKey || options.correspondentApiKey) {
+      return publicOrRoleAuthed(roleKeys, c, next, settlementRoleForPath);
     }
     return publicOrAuthed(apiKey, c, next);
   });

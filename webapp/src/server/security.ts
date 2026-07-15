@@ -116,6 +116,80 @@ export function isPublicPath(path: string): boolean {
   );
 }
 
+/**
+ * Institutional roles for multi-CU settlement APIs.
+ * - issuer: authorize, accept-burn, settlement-payment, settlement events write path
+ * - correspondent: file presentment, burn-evidence
+ * - any: either key when dual keys configured; single CDT_API_KEY maps to both
+ */
+export type ApiRole = "issuer" | "correspondent" | "any";
+
+export interface RoleKeys {
+  /** Shared legacy key (both roles). */
+  apiKey?: string;
+  issuerKey?: string;
+  correspondentKey?: string;
+}
+
+function extractPresentedKey(c: Context): string | undefined {
+  return (
+    c.req.header("x-api-key") ??
+    c.req.header("authorization")?.replace(/^Bearer\s+/i, "")
+  );
+}
+
+/**
+ * Role-aware auth. When no keys are configured, returns 503 (fail-closed)
+ * unless the caller used allowOpenApi (createApp skips middleware).
+ */
+export function requireRole(
+  keys: RoleKeys,
+  role: ApiRole,
+): MiddlewareHandler {
+  return async (c, next) => {
+    const presented = extractPresentedKey(c);
+    const issuer = keys.issuerKey ?? keys.apiKey;
+    const correspondent = keys.correspondentKey ?? keys.apiKey;
+
+    if (!issuer && !correspondent && !keys.apiKey) {
+      return c.json(
+        {
+          error:
+            "API key not configured. Set CDT_API_KEY and/or CDT_ISSUER_API_KEY + CDT_CORRESPONDENT_API_KEY.",
+        },
+        503,
+      );
+    }
+
+    if (!presented) {
+      return c.json({ error: "Unauthorized." }, 401);
+    }
+
+    const isIssuer = issuer ? safeEqual(presented, issuer) : false;
+    const isCorrespondent = correspondent
+      ? safeEqual(presented, correspondent)
+      : false;
+    const isLegacy = keys.apiKey ? safeEqual(presented, keys.apiKey) : false;
+
+    const ok =
+      role === "any"
+        ? isIssuer || isCorrespondent || isLegacy
+        : role === "issuer"
+          ? isIssuer || isLegacy
+          : isCorrespondent || isLegacy;
+
+    if (!ok) {
+      return c.json(
+        {
+          error: `Forbidden for role '${role}'. Use the issuer or correspondent institutional key.`,
+        },
+        403,
+      );
+    }
+    await next();
+  };
+}
+
 export async function publicOrAuthed(
   apiKey: string | undefined,
   c: Context,
@@ -125,4 +199,44 @@ export async function publicOrAuthed(
     return next();
   }
   return requireApiKey(apiKey)(c, next);
+}
+
+/**
+ * Prefer role keys when present; fall back to single apiKey for all non-public routes.
+ */
+export function publicOrRoleAuthed(
+  keys: RoleKeys,
+  c: Context,
+  next: Next,
+  roleForPath: (path: string, method: string) => ApiRole | "public" | "any",
+): Promise<Response | void> | Response | void {
+  const role = roleForPath(c.req.path, c.req.method);
+  if (role === "public" || isPublicPath(c.req.path)) {
+    return next();
+  }
+  if (role === "any") {
+    // Prefer dual-key aware "any", else legacy single key.
+    if (keys.issuerKey || keys.correspondentKey || keys.apiKey) {
+      return requireRole(keys, "any")(c, next);
+    }
+    return requireApiKey(keys.apiKey)(c, next);
+  }
+  return requireRole(keys, role)(c, next);
+}
+
+/** Map settlement network paths to institutional roles. */
+export function settlementRoleForPath(path: string, method: string): ApiRole | "public" | "any" {
+  if (isPublicPath(path)) return "public";
+  if (method === "GET" && /^\/api\/presentments\/\d+\/events$/.test(path)) {
+    return "any";
+  }
+  if (method === "GET" && (path === "/api/presentments" || /^\/api\/presentments\/\d+$/.test(path))) {
+    return "any";
+  }
+  if (method === "POST" && path === "/api/presentments") return "correspondent";
+  if (method === "POST" && /\/authorize$/.test(path)) return "issuer";
+  if (method === "POST" && /\/burn-evidence$/.test(path)) return "correspondent";
+  if (method === "POST" && /\/accept-burn$/.test(path)) return "issuer";
+  if (method === "POST" && /\/settlement-payment$/.test(path)) return "issuer";
+  return "any";
 }
