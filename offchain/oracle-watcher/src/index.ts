@@ -52,3 +52,10 @@ export {
   BankCredentialDirectory,
   verifyHookForMode,
 } from './bank-credentials.js';
+export {
+  signingProviderFromEnv,
+  PemSigningProvider,
+  EphemeralSigningProvider,
+  HsmSigningProvider,
+  type SigningProvider,
+} from './signing-provider.js';

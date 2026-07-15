@@ -16,3 +16,7 @@ export {
   type StatusRow,
 } from "./service.js";
 export { createControlServer, toJson } from "./server.js";
+export {
+  registryAssertMintable,
+  registryRecordMinted,
+} from "./deposit-registry.js";

@@ -83,13 +83,23 @@ cd webapp && NODE_ENV=production npm run check:prod-env
 
 Issuer Postgres table `deposit_registry` tracks `attested → minted → burned` per `deposit_id`.
 
-- Burn accept writes `burned` + unique `burn_tx_hash`.
-- Prevents re-use of the same burn tx or re-attestation after burn at the issuer DB.
+- **Oracle watcher** writes `attested` on each new attestation.
+- **Pipeline mint** asserts not burned, then writes `minted` + `mint_tx_hash` on submit/reconcile.
+- **Burn accept** (webapp) writes `burned` + unique `burn_tx_hash`.
+- Prevents re-use of the same burn/mint tx or re-mint after burn at the issuer DB.
 - **Not** a substitute for a global on-chain one-shot mint registry; it is the pilot control plane.
 
 Query: `GET /api/deposit-registry/:depositId`
 
-## 7. Settlement idempotency
+## 7. Signing providers (oracle)
+
+| Provider | Env | Status |
+| --- | --- | --- |
+| `pem` (default) | `ORACLE_SIGNING_KEY_PEM` | Production software path |
+| `ephemeral` | `ALLOW_EPHEMERAL_ORACLE_KEY=1` | Lab only |
+| `hsm` | `ORACLE_SIGNING_PROVIDER=hsm` + `ORACLE_HSM_MODULE` + `ORACLE_HSM_KEY_ID` | **Stub** — fails closed until PKCS#11 wired |
+
+## 8. Settlement idempotency
 
 Clients should send:
 
