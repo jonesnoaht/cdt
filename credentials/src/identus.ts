@@ -32,6 +32,7 @@ import {
   type VerifiablePresentation,
   type VerifyResult,
 } from "./vc.js";
+import { tlsFetchFromEnv } from "./tls-fetch.js";
 
 /** Minimal agent surface CDT needs for mint gating and member onboarding. */
 export interface IdentusAgent {
@@ -145,11 +146,25 @@ export interface HttpIdentusAgentOptions {
   fetchImpl?: typeof fetch;
   /** Request timeout ms (default 15s). */
   timeoutMs?: number;
+  /**
+   * Map façade paths to your org Identus/Prism agent REST layout.
+   * Defaults match the CDT thin façade documented in this module header.
+   */
+  paths?: {
+    health?: string;
+    verifyPresentation?: string;
+    issueAccountHolder?: string;
+  };
 }
 
 /**
  * HTTP client for an Identus agent façade.
  * Fail-closed on network/HTTP errors.
+ *
+ * Path mapping (env or options):
+ *   IDENTUS_PATH_HEALTH           default /health
+ *   IDENTUS_PATH_VERIFY           default /v1/presentations/verify
+ *   IDENTUS_PATH_ISSUE_ACCOUNT    default /v1/credentials/account-holder
  */
 export class HttpIdentusAgent implements IdentusAgent {
   readonly kind = "http" as const;
@@ -158,6 +173,11 @@ export class HttpIdentusAgent implements IdentusAgent {
   private readonly roots: string[];
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
+  private readonly paths: {
+    health: string;
+    verifyPresentation: string;
+    issueAccountHolder: string;
+  };
 
   constructor(opts: HttpIdentusAgentOptions | string, apiToken?: string, roots: string[] = []) {
     if (typeof opts === "string") {
@@ -166,13 +186,30 @@ export class HttpIdentusAgent implements IdentusAgent {
       this.roots = roots;
       this.fetchImpl = fetch;
       this.timeoutMs = 15_000;
+      this.paths = {
+        health: "/health",
+        verifyPresentation: "/v1/presentations/verify",
+        issueAccountHolder: "/v1/credentials/account-holder",
+      };
     } else {
       this.baseUrl = opts.baseUrl.replace(/\/$/, "");
       if (opts.apiToken !== undefined) this.apiToken = opts.apiToken;
       this.roots = opts.trustedRoots ?? [];
       this.fetchImpl = opts.fetchImpl ?? fetch;
       this.timeoutMs = opts.timeoutMs ?? 15_000;
+      this.paths = {
+        health: opts.paths?.health ?? "/health",
+        verifyPresentation: opts.paths?.verifyPresentation ?? "/v1/presentations/verify",
+        issueAccountHolder:
+          opts.paths?.issueAccountHolder ?? "/v1/credentials/account-holder",
+      };
     }
+  }
+
+  /** Absolute URL for a façade path (leading slash required on path). */
+  endpoint(path: string): string {
+    const p = path.startsWith("/") ? path : `/${path}`;
+    return `${this.baseUrl}${p}`;
   }
 
   trustedRoots(): string[] {
@@ -194,7 +231,7 @@ export class HttpIdentusAgent implements IdentusAgent {
     expiresInMs?: number;
   }): Promise<{ credential: VerifiableCredential } | { error: string }> {
     try {
-      const res = await this.fetchImpl(`${this.baseUrl}/v1/credentials/account-holder`, {
+      const res = await this.fetchImpl(this.endpoint(this.paths.issueAccountHolder), {
         method: "POST",
         headers: this.headers(),
         body: JSON.stringify({
@@ -206,15 +243,19 @@ export class HttpIdentusAgent implements IdentusAgent {
       });
       const body = (await res.json().catch(() => ({}))) as {
         credential?: VerifiableCredential;
+        /** Some agents return the VC under data.credential */
+        data?: { credential?: VerifiableCredential };
         error?: string;
+        message?: string;
       };
       if (!res.ok) {
-        return { error: body.error ?? `Identus agent HTTP ${res.status}` };
+        return { error: body.error ?? body.message ?? `Identus agent HTTP ${res.status}` };
       }
-      if (!body.credential) {
+      const credential = body.credential ?? body.data?.credential;
+      if (!credential) {
         return { error: "Identus agent returned no credential object." };
       }
-      return { credential: body.credential };
+      return { credential };
     } catch (err) {
       return { error: `Identus issueAccountHolder failed: ${String(err)}` };
     }
@@ -226,7 +267,7 @@ export class HttpIdentusAgent implements IdentusAgent {
     now?: Date;
   }): Promise<VerifyResult> {
     try {
-      const res = await this.fetchImpl(`${this.baseUrl}/v1/presentations/verify`, {
+      const res = await this.fetchImpl(this.endpoint(this.paths.verifyPresentation), {
         method: "POST",
         headers: this.headers(),
         body: JSON.stringify({
@@ -239,13 +280,22 @@ export class HttpIdentusAgent implements IdentusAgent {
       });
       const body = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
+        verified?: boolean;
         reason?: string;
+        error?: string;
+        message?: string;
       };
       if (!res.ok) {
-        return { ok: false, reason: body.reason ?? `Identus agent HTTP ${res.status}` };
+        return {
+          ok: false,
+          reason: body.reason ?? body.error ?? body.message ?? `Identus agent HTTP ${res.status}`,
+        };
       }
-      if (body.ok === true) return { ok: true };
-      return { ok: false, reason: body.reason ?? "presentation rejected by Identus agent" };
+      if (body.ok === true || body.verified === true) return { ok: true };
+      return {
+        ok: false,
+        reason: body.reason ?? body.error ?? "presentation rejected by Identus agent",
+      };
     } catch (err) {
       return { ok: false, reason: `Identus verifyPresentation failed: ${String(err)}` };
     }
@@ -253,7 +303,7 @@ export class HttpIdentusAgent implements IdentusAgent {
 
   async status(): Promise<{ ready: boolean; detail: string }> {
     try {
-      const res = await this.fetchImpl(`${this.baseUrl}/health`, {
+      const res = await this.fetchImpl(this.endpoint(this.paths.health), {
         method: "GET",
         headers: this.headers(),
         signal: AbortSignal.timeout(this.timeoutMs),
@@ -266,13 +316,19 @@ export class HttpIdentusAgent implements IdentusAgent {
       }
       const body = (await res.json().catch(() => ({}))) as {
         ready?: boolean;
+        status?: string;
         detail?: string;
       };
+      const ready =
+        body.ready === true ||
+        body.status === "UP" ||
+        body.status === "ok" ||
+        (body.ready === undefined && body.status === undefined && res.ok);
       return {
-        ready: body.ready === true,
+        ready,
         detail:
           body.detail ??
-          `Identus agent reachable at ${this.baseUrl}; token=${this.apiToken ? "set" : "unset"}`,
+          `Identus agent reachable at ${this.baseUrl}; token=${this.apiToken ? "set" : "unset"}; paths=${JSON.stringify(this.paths)}`,
       };
     } catch (err) {
       return {
@@ -315,12 +371,22 @@ export function createIdentusAgentFromEnv(
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
+    let fetchFn = fetchImpl;
+    if (!fetchFn && (env.CDT_TLS_CERT_FILE || env.CDT_TLS_CA_FILE || env.CDT_TLS_KEY_FILE)) {
+      fetchFn = tlsFetchFromEnv(env);
+    }
     const opts: HttpIdentusAgentOptions = {
       baseUrl: base,
       trustedRoots: roots,
+      paths: {
+        health: env.IDENTUS_PATH_HEALTH || "/health",
+        verifyPresentation: env.IDENTUS_PATH_VERIFY || "/v1/presentations/verify",
+        issueAccountHolder:
+          env.IDENTUS_PATH_ISSUE_ACCOUNT || "/v1/credentials/account-holder",
+      },
     };
     if (env.IDENTUS_API_TOKEN) opts.apiToken = env.IDENTUS_API_TOKEN;
-    if (fetchImpl) opts.fetchImpl = fetchImpl;
+    if (fetchFn) opts.fetchImpl = fetchFn;
     return new HttpIdentusAgent(opts);
   }
   return new UnconfiguredIdentusAgent();

@@ -238,6 +238,31 @@ export async function validateBurnTx(
       };
     }
 
+    // Prefer exactly -1 of the deposit asset (one CDT burned).
+    const burnQty = quantityNumber(burn.quantity);
+    if (burnQty !== -1) {
+      const reason = `Expected burn quantity -1 for deposit CDT, got ${burn.quantity}.`;
+      if (params.mode === "soft") {
+        return {
+          ok: true,
+          mode: "soft",
+          onChain: true,
+          provider: "koios-preview",
+          explorerUrl: explorerUrlFor(txHash),
+          burnedQuantity: burn.quantity,
+          policyId: burn.policyId,
+          assetNameHex: burn.assetNameHex,
+          warning: reason,
+        };
+      }
+      return {
+        ok: false,
+        mode: "strict",
+        reason,
+        reasonCode: "TX_INVALID",
+      };
+    }
+
     return {
       ok: true,
       mode: params.mode,

@@ -152,4 +152,30 @@ describe("validateBurnTx", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reasonCode).toBe("TX_NOT_FOUND");
   });
+
+  it("strict rejects burn quantity other than -1", async () => {
+    const fetchImpl: typeof fetch = async () =>
+      new Response(
+        JSON.stringify([
+          {
+            tx_hash: txHash,
+            mint: [{ policy_id: "ff".repeat(28), asset_name: nameHex, quantity: "-2" }],
+          },
+        ]),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    const r = await validateBurnTx({
+      provider: "koios-preview",
+      koiosBaseUrl: "https://koios.test/api/v1",
+      txHash,
+      depositId,
+      mode: "strict",
+      fetchImpl,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reasonCode).toBe("TX_INVALID");
+      expect(r.reason).toMatch(/-1/);
+    }
+  });
 });
