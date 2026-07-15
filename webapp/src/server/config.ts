@@ -37,6 +37,8 @@ export interface ServerConfig {
   issuerApiKey: string | undefined;
   /** Correspondent institutional API key (optional dual-key mode). */
   correspondentApiKey: string | undefined;
+  /** HS256 JWT secret for institutional tokens. */
+  jwtSecret: string | undefined;
 }
 
 /**
@@ -77,5 +79,6 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
     cdtPolicyId: env.CDT_POLICY_ID || undefined,
     issuerApiKey: env.CDT_ISSUER_API_KEY || undefined,
     correspondentApiKey: env.CDT_CORRESPONDENT_API_KEY || undefined,
+    jwtSecret: env.CDT_JWT_SECRET || undefined,
   };
 }

@@ -40,6 +40,7 @@ const app = createApp({
   settlementRail: settlementRailFromEnv(),
   issuerApiKey: config.issuerApiKey,
   correspondentApiKey: config.correspondentApiKey,
+  jwtSecret: config.jwtSecret,
 });
 
 // Serve the built UI when it exists (vite build → dist/ui), so the API
