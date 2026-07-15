@@ -81,3 +81,17 @@ CREATE TABLE IF NOT EXISTS presentments (
 
 CREATE INDEX IF NOT EXISTS idx_presentments_deposit ON presentments (deposit_id);
 CREATE INDEX IF NOT EXISTS idx_presentments_status ON presentments (status);
+
+CREATE TABLE IF NOT EXISTS presentment_events (
+  id BIGSERIAL PRIMARY KEY,
+  presentment_id INT NOT NULL REFERENCES presentments (id) ON DELETE CASCADE,
+  from_status TEXT,
+  to_status TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  detail JSONB NOT NULL DEFAULT '{}',
+  actor TEXT NOT NULL DEFAULT 'system',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_presentment_events_presentment
+  ON presentment_events (presentment_id, id);

@@ -381,6 +381,14 @@ describe("correspondent presentment", () => {
     expect(
       (paid.body as { settlementPayment: { traceId: string } }).settlementPayment.traceId.length,
     ).toBeGreaterThan(4);
+
+    const eventsRes = await get(`/api/presentments/${id}/events`);
+    expect(eventsRes.status).toBe(200);
+    const events = eventsRes.body as Array<{ eventType: string; toStatus: string }>;
+    expect(events.map((e) => e.eventType)).toEqual(
+      expect.arrayContaining(["authorize", "burn_evidence", "burn_accepted", "settlement_payment"]),
+    );
+    expect(events.at(-1)?.toStatus).toBe("settled");
     const wrongName = await post("/api/presentments", {
       claimRef: String(fx.cds.maturedTxId),
       walkInName: "Impostor",
