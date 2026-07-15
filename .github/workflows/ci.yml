@@ -241,7 +241,8 @@ jobs:
             "default": true,
             "MD013": false,
             "MD033": false,
-            "MD041": false
+            "MD041": false,
+            "MD060": false
           }
           EOF
           npx --yes markdownlint-cli2@0.23.0 --config "$config" "README.md" "docs/**/*.md"

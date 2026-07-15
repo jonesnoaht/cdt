@@ -143,7 +143,8 @@ export function createApp(options: AppOptions): Hono {
   const { pool } = options;
   const now = options.now ?? Date.now;
   const koiosBaseUrl = options.koiosBaseUrl ?? "https://preview.koios.rest/api/v1";
-  const presentments = options.presentmentStore ?? new PresentmentStore();
+  const presentments = options.presentmentStore ?? new PresentmentStore(pool);
+  void presentments.init();
   const paymentOracle = options.paymentOracle ?? new PaymentOracle();
   const allowOpenApi = options.allowOpenApi === true;
   const apiKey =
@@ -406,6 +407,26 @@ export function createApp(options: AppOptions): Hono {
       role: "correspondent_presenting_cu",
       description:
         "Desk for a non-issuing credit union that verifies a foreign CDT and may advance cash against settlement from the issuer.",
+      settlementNetwork: {
+        messages: [
+          "ClaimLookup",
+          "PresentmentRequest",
+          "SettlementAuth",
+          "BurnEvidence",
+          "BurnAccepted",
+          "SettlementPayment",
+        ],
+        holdUntilBurn: true,
+      },
+    }),
+  );
+
+  app.get("/api/settlement/pubkey", (c) =>
+    c.json({
+      algorithm: "Ed25519",
+      publicKeySpkiBase64: presentments.getSigner().publicKeySpkiBase64,
+      purpose: "cdt.settlement_auth.v1",
+      issuerInstitutionId: presentments.getSigner().issuerInstitutionId,
     }),
   );
 
@@ -417,12 +438,12 @@ export function createApp(options: AppOptions): Hono {
     return c.json(claim satisfies ClaimLookupDto);
   });
 
-  app.get("/api/presentments", (c) => c.json(presentments.list()));
+  app.get("/api/presentments", async (c) => c.json(await presentments.list()));
 
-  app.get("/api/presentments/:id", (c) => {
+  app.get("/api/presentments/:id", async (c) => {
     const id = parseIdParam(c.req.param("id"));
     if (id === null) return c.json({ error: "Invalid presentment id." }, 400);
-    const row = presentments.get(id);
+    const row = await presentments.get(id);
     if (!row) return c.json({ error: "Presentment not found." }, 404);
     return c.json(row);
   });
@@ -441,11 +462,85 @@ export function createApp(options: AppOptions): Hono {
     const claim = await lookupClaim(pool, req.claimRef, now());
     if (!claim) return c.json({ error: "No certificate found for that claim reference." }, 404);
 
-    const result = presentments.create({ claim, body: req, nowMs: now() });
+    const result = await presentments.create({ claim, body: req, nowMs: now() });
     if ("error" in result) {
       return c.json({ error: result.error }, result.status as 400 | 409 | 422);
     }
     return c.json(result satisfies PresentmentDto, 201);
+  });
+
+  /** Issue SettlementAuth (signed, burn_required, TTL). */
+  app.post("/api/presentments/:id/authorize", async (c) => {
+    const id = parseIdParam(c.req.param("id"));
+    if (id === null) return c.json({ error: "Invalid presentment id." }, 400);
+    const result = await presentments.authorize(id, now());
+    if ("error" in result) {
+      return c.json({ error: result.error }, result.status as 404 | 422);
+    }
+    return c.json(result);
+  });
+
+  /** Submit BurnEvidence (Cardano burn tx hash). */
+  app.post("/api/presentments/:id/burn-evidence", async (c) => {
+    const id = parseIdParam(c.req.param("id"));
+    if (id === null) return c.json({ error: "Invalid presentment id." }, 400);
+    let body: { txHash?: string; mode?: string };
+    try {
+      body = (await c.req.json()) as { txHash?: string; mode?: string };
+    } catch {
+      return c.json({ error: "Request body must be JSON." }, 400);
+    }
+    if (typeof body.txHash !== "string") {
+      return c.json({ error: "txHash is required." }, 400);
+    }
+    const result = await presentments.submitBurnEvidence(id, {
+      txHash: body.txHash,
+      mode: body.mode,
+    });
+    if ("error" in result) {
+      return c.json({ error: result.error }, result.status as 400 | 404 | 409 | 422);
+    }
+    return c.json(result);
+  });
+
+  /** Issuer accepts burn (BurnAccepted) after validation. */
+  app.post("/api/presentments/:id/accept-burn", async (c) => {
+    const id = parseIdParam(c.req.param("id"));
+    if (id === null) return c.json({ error: "Invalid presentment id." }, 400);
+    const result = await presentments.acceptBurn(id);
+    if ("error" in result) {
+      return c.json({ error: result.error }, result.status as 404 | 422);
+    }
+    return c.json(result);
+  });
+
+  /** Record SettlementPayment after core close. */
+  app.post("/api/presentments/:id/settlement-payment", async (c) => {
+    const id = parseIdParam(c.req.param("id"));
+    if (id === null) return c.json({ error: "Invalid presentment id." }, 400);
+    let body: { amountCents?: number; rail?: string; traceId?: string; paidAt?: string };
+    try {
+      body = (await c.req.json()) as typeof body;
+    } catch {
+      return c.json({ error: "Request body must be JSON." }, 400);
+    }
+    if (typeof body.amountCents !== "number" || typeof body.rail !== "string" || typeof body.traceId !== "string") {
+      return c.json({ error: "amountCents, rail, and traceId are required." }, 400);
+    }
+    const result = await presentments.recordSettlementPayment(
+      id,
+      {
+        amountCents: body.amountCents,
+        rail: body.rail,
+        traceId: body.traceId,
+        paidAt: body.paidAt,
+      },
+      now(),
+    );
+    if ("error" in result) {
+      return c.json({ error: result.error }, result.status as 404 | 422);
+    }
+    return c.json(result);
   });
 
   // --- Payment terminal: opt-in oracle attestation check (free-spend CDT) ----
@@ -460,7 +555,7 @@ export function createApp(options: AppOptions): Hono {
       flow: [
         "GET /api/payment/oracle-pubkey — pin the oracle key",
         "POST /api/payment/challenge — one-time nonce",
-        "POST /api/payment/verify — { claimRef, merchantId, challenge, amountCents?, payerWallet? }",
+        "POST /api/payment/verify — { claimRef, merchantId, challenge, amountCents?, payerWallet }",
         "Locally verify Ed25519 signature over canonical JSON of signedCheck.payload",
         "Accept payment only if ok and signature valid and not expired",
       ],

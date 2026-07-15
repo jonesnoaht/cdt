@@ -339,6 +339,44 @@ describe("correspondent presentment", () => {
     expect(list.status).toBe(200);
     expect(list.body).toHaveLength(1);
 
+    const id = (ok.body as { id: number }).id;
+    const auth = await post(`/api/presentments/${id}/authorize`, {});
+    expect(auth.status).toBe(200);
+    expect(auth.body).toMatchObject({ status: "authorized" });
+    expect(
+      (auth.body as { settlementAuth: { payload: { burn_required: boolean } } }).settlementAuth
+        .payload.burn_required,
+    ).toBe(true);
+
+    const badBurn = await post(`/api/presentments/${id}/burn-evidence`, {
+      txHash: "not-a-hash",
+    });
+    expect(badBurn.status).toBe(400);
+
+    const burnHash = "a".repeat(64);
+    const burn = await post(`/api/presentments/${id}/burn-evidence`, {
+      txHash: burnHash,
+      mode: "early_withdraw",
+    });
+    expect(burn.status).toBe(200);
+    expect(burn.body).toMatchObject({
+      status: "burn_submitted",
+      burnTxHash: burnHash,
+    });
+
+    const accepted = await post(`/api/presentments/${id}/accept-burn`, {});
+    expect(accepted.status).toBe(200);
+    expect((accepted.body as { status: string }).status).toBe("burn_accepted");
+
+    const cashOut = (ok.body as { cashOutCents: number }).cashOutCents;
+    const paid = await post(`/api/presentments/${id}/settlement-payment`, {
+      amountCents: cashOut,
+      rail: "ACH",
+      traceId: "trace-demo-1",
+    });
+    expect(paid.status).toBe(200);
+    expect((paid.body as { status: string }).status).toBe("settled");
+
     const wrongName = await post("/api/presentments", {
       claimRef: String(fx.cds.maturedTxId),
       walkInName: "Impostor",

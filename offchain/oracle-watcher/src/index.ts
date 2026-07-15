@@ -42,3 +42,9 @@ export {
   type MockProof,
   type VerifyResult,
 } from './vc-mock.js';
+export {
+  buildVerifyPresentationHook,
+  PresentationDirectory,
+  vcModeFromEnv,
+  type VcMode,
+} from './credentials-hook.js';

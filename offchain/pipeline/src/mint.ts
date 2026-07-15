@@ -96,6 +96,21 @@ export async function buildVaultMintTx(
       `terms.penaltyBps must be in [0, ${BPS_DENOMINATOR}], got ${terms.penaltyBps}`,
     );
   }
+  const accountId = assertHexBytes("terms.accountId", terms.accountId);
+  if (accountId.length === 0 || accountId.length > 64) {
+    throw new Error(
+      `terms.accountId must be 1..32 bytes, got ${accountId.length / 2}`,
+    );
+  }
+  const attestationHash = assertHexBytes(
+    "terms.attestationHash",
+    terms.attestationHash,
+  );
+  if (attestationHash.length !== 64) {
+    throw new Error(
+      `terms.attestationHash must be 32 bytes, got ${attestationHash.length / 2}`,
+    );
+  }
 
   const ownerCredential = paymentCredentialOf(params.ownerAddress);
   if (ownerCredential.type !== "Key") {
@@ -112,6 +127,8 @@ export async function buildVaultMintTx(
     maturity: terms.maturity,
     penalty_bps: terms.penaltyBps,
     cdt_policy: scripts.policyId,
+    account_id: accountId,
+    attestation_hash: attestationHash,
   };
   const datumCbor = Data.to(datum, CDDatum);
   const unit = toUnit(scripts.policyId, depositId);

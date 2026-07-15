@@ -110,7 +110,8 @@ export function isPublicPath(path: string): boolean {
     path === "/api/health" ||
     path === "/api/payment/contract" ||
     path === "/api/payment/oracle-pubkey" ||
-    path === "/api/correspondent/meta"
+    path === "/api/correspondent/meta" ||
+    path === "/api/settlement/pubkey"
   );
 }
 
