@@ -37,4 +37,6 @@ export {
   UnconfiguredIdentusAgent,
   createIdentusAgentFromEnv,
   type IdentusAgent,
+  type HttpIdentusAgentOptions,
 } from "./identus.js";
+export { createTlsFetch, tlsFetchFromEnv, type FetchLike, type TlsFetchOptions } from "./tls-fetch.js";

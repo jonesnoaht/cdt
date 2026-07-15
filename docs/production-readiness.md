@@ -56,6 +56,10 @@ export SETTLEMENT_RAIL=http
 export SETTLEMENT_ACH_URL=https://ach-adapter.internal/v1/credit
 export SETTLEMENT_ACH_TOKEN=…            # optional Bearer
 # lab: SETTLEMENT_RAIL=mock
+export CDT_TLS_CERT_FILE=/etc/cdt/client.crt
+export CDT_TLS_KEY_FILE=/etc/cdt/client.key
+export CDT_TLS_CA_FILE=/etc/cdt/ca.crt
+# never in production: CDT_TLS_REJECT_UNAUTHORIZED=0
 export HOST=127.0.0.1
 export CDT_VC_MODE=credentials
 export CDT_TRUSTED_ROOT_DID='did:…'
@@ -80,13 +84,13 @@ Terminate TLS at a reverse proxy; never expose Postgres or the API on a public i
 
 | Gap | Why | Status |
 | --- | --- | --- |
-| **Hyperledger Identus / did:prism** | Replace mock DID/VC | **HTTP client:** `HttpIdentusAgent` → `/health`, `/v1/presentations/verify`, `/v1/credentials/account-holder` (`IDENTUS_MODE=http`) |
+| **Hyperledger Identus / did:prism** | Replace mock DID/VC | **HTTP client + path map + mTLS:** `IDENTUS_PATH_*`, `docs/ops/identus-path-mapping.md`, `CDT_TLS_*` |
 | **Settlement audit** | Immutable transition log | **Done:** `presentment_events` + `GET /api/presentments/:id/events` |
 | **SettlementAuth binding** | Auth must match claim + stay valid | **Done:** deposit_id match + signature/TTL re-check on burn + accept |
-| **On-chain burn validation** | Prove burn tx burns deposit CDT | **Done (Koios):** `BURN_VALIDATE_MODE=strict` + `CHAIN_PROVIDER=koios-preview`; optional `CDT_POLICY_ID` |
-| **ACH/FedNow integration** | SettlementPayment is an audit record | **HTTP adapter:** `SETTLEMENT_RAIL=http` + `SETTLEMENT_ACH_URL`; mock/log/none remain |
-| **Oracle VC path** | Fail-closed / accept-all | **credentials mode** enrolls bank DIDs via `@cdt/credentials` (`BankCredentialDirectory`) |
-| **mTLS / institutional JWT** | Spec inter-CU auth | **Dual API keys + HS256 JWT:** `CDT_JWT_SECRET`, `POST /api/auth/token`, Bearer role claims; dual keys still supported |
+| **On-chain burn validation** | Prove burn tx burns deposit CDT | **Done (Koios):** negative mint qty **exactly -1** for deposit asset; optional policy pin |
+| **ACH/FedNow integration** | SettlementPayment is an audit record | **HTTP + optional mTLS:** `SETTLEMENT_RAIL=http` + `SETTLEMENT_ACH_URL` + `CDT_TLS_*` |
+| **mTLS / institutional JWT** | Spec inter-CU auth | **JWT/keys done** + **outbound mTLS** via `CDT_TLS_CERT/KEY/CA_FILE` for ACH/IDV/Identus |
+| **Oracle VC path** | Fail-closed / accept-all | **credentials mode** + Identus HTTP path map |
 | **HSM / dual control** | Mint oracle and settlement keys | **Dual-control SettlementAuth cosign** (`SETTLEMENT_DUAL_CONTROL`); oracle **remote signer** (`ORACLE_SIGNING_PROVIDER=remote`) + PKCS#11 stub |
 | **Professional SC audit** | Aiken validators + economic model | **Pre-audit package:** `docs/ops/sc-audit-brief.md` (engagement not executed) |
 | **One-shot on-chain deposit registry** | Global uniqueness | **Off-chain done** + **design + Aiken scaffold** (`docs/ops/on-chain-deposit-registry.md`, `deposit_registry.ak`); mint co-spend open |

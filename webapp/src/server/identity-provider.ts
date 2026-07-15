@@ -11,6 +11,7 @@
  *
  * Does not store NPI; returns only decision + opaque reference.
  */
+import { tlsFetchFromEnv } from "./tls-fetch.js";
 export type IdvCheckKind = "cip" | "ofac" | "ownership" | "composite";
 
 export interface IdvCheckRequest {
@@ -179,7 +180,11 @@ export function identityProviderFromEnv(
     if (!url) {
       throw new Error("CDT_IDV_MODE=http requires CDT_IDV_URL");
     }
-    return new HttpIdentityProvider(url, env.CDT_IDV_TOKEN);
+    let fetchImpl: typeof fetch | undefined;
+    if (env.CDT_TLS_CERT_FILE || env.CDT_TLS_CA_FILE || env.CDT_TLS_KEY_FILE) {
+      fetchImpl = tlsFetchFromEnv(env);
+    }
+    return new HttpIdentityProvider(url, env.CDT_IDV_TOKEN, fetchImpl);
   }
   return new MockIdentityProvider();
 }

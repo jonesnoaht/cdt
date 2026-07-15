@@ -114,6 +114,12 @@ if (isProd) {
     warn("BURN_VALIDATE_MODE", "off — prefer soft/strict with CHAIN_PROVIDER=koios-preview");
   }
 
+  if (env.CDT_TLS_REJECT_UNAUTHORIZED === "0" || env.CDT_TLS_REJECT_UNAUTHORIZED === "false") {
+    err("CDT_TLS_REJECT_UNAUTHORIZED", "Must not disable TLS verification in production");
+  } else if (env.CDT_TLS_CERT_FILE || env.CDT_TLS_CA_FILE) {
+    ok("CDT_TLS", "client cert and/or CA pin configured for outbound mTLS");
+  }
+
   if (env.CDT_JWT_SECRET && env.CDT_JWT_SECRET.length < 32) {
     warn("CDT_JWT_SECRET", "use ≥32 random bytes in production");
   } else if (env.CDT_JWT_SECRET) {

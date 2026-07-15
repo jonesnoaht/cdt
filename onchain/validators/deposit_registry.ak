@@ -7,8 +7,14 @@
 //// append a new id must co-occur with minting that asset under the CDT
 //// policy (enforced when this validator is linked in a future mint redesign).
 ////
+//// Continuity contract for the mint co-spend (off-chain builder MUST ensure):
+////   1. Exactly one input is this registry script UTxO (own_ref).
+////   2. Exactly one output returns to the same script address with inline datum
+////      DepositRegistryDatum { admin: d.admin, used: try_append(d.used, id) }.
+////   3. Same tx mints +1 of deposit_id under the CDT policy (oracle co-sign).
+////
 //// Current code: validates structural rules for RegisterDeposit in isolation
-//// so the module typechecks; integration tests will land when mint is wired.
+//// so the module typechecks; full output continuity lands with mint wiring.
 
 use aiken/collection/list
 use aiken/crypto.{VerificationKeyHash}
@@ -44,6 +50,17 @@ fn try_append(
   }
 }
 
+/// Expected successor datum after a successful RegisterDeposit.
+fn next_datum(
+  d: DepositRegistryDatum,
+  deposit_id: ByteArray,
+) -> Option<DepositRegistryDatum> {
+  when try_append(d.used, deposit_id) is {
+    Some(used) -> Some(DepositRegistryDatum { admin: d.admin, used })
+    None -> None
+  }
+}
+
 validator deposit_registry {
   spend(
     datum: Option<DepositRegistryDatum>,
@@ -58,12 +75,12 @@ validator deposit_registry {
         // Production may replace with mint-policy linkage (no admin sig).
         and {
           list.has(self.extra_signatories, d.admin),
-          when try_append(d.used, deposit_id) is {
-            Some(_next) -> True
+          when next_datum(d, deposit_id) is {
+            Some(_) -> True
             None -> False
           },
-          // Continuity of registry output must be checked by the surrounding
-          // transaction builder (mint redesign). Scaffold only gates double-id.
+          // Output continuity + mint co-spend checked by surrounding tx builder
+          // until cdt_mint is re-parameterized with this registry script hash.
           True,
         }
       }
@@ -84,5 +101,20 @@ test append_duplicate_fails() {
 }
 
 test append_empty_fails() {
-  try_append([], #"" ) == None
+  try_append([], #"") == None
+}
+
+test next_datum_preserves_admin() {
+  let d =
+    DepositRegistryDatum {
+      admin: #"00112233445566778899aabbccddeeff00112233445566778899aabb",
+      used: [#"aa"],
+    }
+  when next_datum(d, #"bb") is {
+    Some(n) -> and {
+        n.admin == d.admin,
+        n.used == [#"aa", #"bb"],
+      }
+    None -> False
+  }
 }

@@ -10,6 +10,7 @@
  *   http  — POST to SETTLEMENT_ACH_URL (real bank adapter / middleware)
  *   none  — refuse to pay (record-only until rail wired)
  */
+import { tlsFetchFromEnv } from "./tls-fetch.js";
 export interface SettlementRailRequest {
   presentmentId: number;
   amountCents: number;
@@ -188,7 +189,11 @@ export function settlementRailFromEnv(
         "SETTLEMENT_RAIL=http requires SETTLEMENT_ACH_URL (bank ACH/FedNow adapter endpoint)",
       );
     }
-    return new HttpAchRail(url, env.SETTLEMENT_ACH_TOKEN);
+    let fetchImpl: typeof fetch | undefined;
+    if (env.CDT_TLS_CERT_FILE || env.CDT_TLS_CA_FILE || env.CDT_TLS_KEY_FILE) {
+      fetchImpl = tlsFetchFromEnv(env);
+    }
+    return new HttpAchRail(url, env.SETTLEMENT_ACH_TOKEN, fetchImpl);
   }
   return new MockAchRail();
 }
