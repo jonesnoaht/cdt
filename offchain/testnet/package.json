@@ -12,7 +12,8 @@
     "setup": "tsx src/setup.ts",
     "fund": "tsx src/fund.ts",
     "lifecycle": "tsx src/lifecycle.ts",
-    "typecheck": "tsc --noEmit"
+    "build:txlib": "npm --prefix ../cdt-txlib ci --include=dev --no-audit --no-fund && npm --prefix ../cdt-txlib run build",
+    "typecheck": "npm run build:txlib && tsc --noEmit"
   },
   "dependencies": {
     "@cdt/txlib": "file:../cdt-txlib",

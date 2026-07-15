@@ -22,7 +22,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "prepare": "npm run build",
+    "prepare": "node ./scripts/soft-prepare.mjs tsconfig.build.json",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
