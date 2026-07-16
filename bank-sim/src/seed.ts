@@ -64,16 +64,24 @@ export async function seed(
 ): Promise<SeedResult> {
   const nowMs = opts?.nowMs ?? Date.now();
 
-  // presentment tables may not exist on very old volumes; ignore if missing.
+  // Facility / presentment tables may not exist on very old volumes; ignore if missing.
   await pool.query(`
     DO $$ BEGIN
-      TRUNCATE presentment_events, presentments, deposit_registry, attestations, transactions, accounts, cd_products
+      TRUNCATE facility_events, facility_presentments, credit_facilities, certificates,
+               presentment_events, presentments, deposit_registry, attestations,
+               transactions, accounts, cd_products
         RESTART IDENTITY CASCADE;
     EXCEPTION WHEN undefined_table THEN
       BEGIN
-        TRUNCATE attestations, transactions, accounts, cd_products RESTART IDENTITY CASCADE;
+        TRUNCATE presentment_events, presentments, deposit_registry, attestations,
+                 transactions, accounts, cd_products
+          RESTART IDENTITY CASCADE;
       EXCEPTION WHEN undefined_table THEN
-        NULL;
+        BEGIN
+          TRUNCATE attestations, transactions, accounts, cd_products RESTART IDENTITY CASCADE;
+        EXCEPTION WHEN undefined_table THEN
+          NULL;
+        END;
       END;
     END $$;
   `);
