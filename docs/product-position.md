@@ -1,24 +1,26 @@
-# Product position: CU login → buy CDT → browser wallet (Lace)
+# Product position: CU login → credit-claim CDT → browser wallet (Lace)
 
-**Status:** Canonical product position (July 2026)  
-**Related:** [manual.md](./manual.md) · [whitepaper.md](./whitepaper.md) · [payment-check-contract.md](./payment-check-contract.md) · CIP-30 Lace path in webapp `#/sign` and `#/open`
+**Status:** Canonical product position (July 2026) — **credit-claim primary**  
+**Design:** [superpowers/specs/2026-07-16-cdt-credit-claim-design.md](./superpowers/specs/2026-07-16-cdt-credit-claim-design.md)  
+**Related:** [manual.md](./manual.md) · [whitepaper.md](./whitepaper.md) · CIP-30 Lace · webapp `#/facility`, `#/facility-present`
 
 ---
 
-## The position
+## The position (primary)
 
-**A member should be able to log into their credit union account and buy a Certificate of Deposit Token (CDT) that is delivered into a wallet they control in the browser—starting with [Lace](https://www.lace.io/) via CIP-30.**
-
-This is not a speculative “crypto on-ramp.” It is **digital banking with a self-custodied certificate**:
+**A member opens a pledged share certificate and a secured line of credit against it. CDT minted into their wallet equals available credit. They keep the certificate coupon. Others can hold and spend CDT; cash-out draws the original depositor’s LOC — not a partial close of the CD.**
 
 | Step | Who | What |
 | --- | --- | --- |
-| 1 | Member | Authenticates to the **credit union** (online banking / desk session)—not to a third-party exchange |
-| 2 | Member + CU | Chooses term/amount; completes CIP/disclosures; funds a **share certificate** on the CU core |
-| 3 | Oracle + mint | After deposit + credential chain, a **CDT** is minted and bound to the member |
-| 4 | Member | **Receives / controls** the certificate from a **browser wallet** (Lace preferred) |
+| 1 | Member | Authenticates to the **credit union** (desk / online banking) |
+| 2 | Member + CU | Opens **CD** (coupon to depositor) + **secured LOC** (LTV e.g. 90%) |
+| 3 | Oracle + mint | Mints **bearer CDT = available credit** to member wallet |
+| 4 | Commerce | Free-spend transfers; presenter cash-out runs **CIP/OFAC** then draws **depositor LOC** and burns CDT |
+| 5 | Maturity | **Waterfall** (LOC → CDT face → residual to depositor); optional **re-issue** only with dual opt-in |
 
-The **dollars stay at the credit union** as an insured (when eligible) share certificate. What the member holds in Lace is a **portable, cryptographically verifiable claim** on that contract—not a deposit leaving the CU.
+Legacy path (`#/open` vault interest redeem) remains for demos but is **not** the primary product.
+
+The **deposit stays on the CU books** as the pledged certificate. CDT is a portable claim on **credit capacity**, not “the deposit itself,” and is **not** NCUSIF-insured.
 
 ---
 

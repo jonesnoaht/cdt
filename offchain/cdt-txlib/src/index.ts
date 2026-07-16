@@ -55,3 +55,10 @@ export {
   onchainRegistryRequired,
   type RegistryMintCospendPlan,
 } from "./deposit-registry.js";
+
+export {
+  assertClaimMintAmount,
+  planClaimMint,
+  seriesIdToAssetNameHex,
+  type ClaimMintPlan,
+} from "./claim-builders.js";

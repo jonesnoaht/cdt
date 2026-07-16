@@ -45,6 +45,7 @@ import {
   credentialGrantsRole,
   type RoleKeys,
 } from "./security.js";
+import { facilityRoutes } from "./facility-routes.js";
 
 /**
  * Largest deposit (in cents) whose lovelace representation still fits in a
@@ -247,6 +248,9 @@ export function createApp(options: AppOptions): Hono {
   });
 
   app.get("/api/health", (c) => c.json({ ok: true }));
+
+  // Credit-claim facilities (CD + secured LOC) — core-led product path.
+  app.route("/api", facilityRoutes(pool));
 
   /** Create a mobile wallet sign request (QR claim URL). */
   app.post("/api/sign-requests", async (c) => {

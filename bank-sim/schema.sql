@@ -141,3 +141,75 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_presentments_idempotency
   ON presentments (idempotency_key)
   WHERE idempotency_key IS NOT NULL AND idempotency_key <> '';
 
+-- Credit-claim product: CD + secured LOC + CDT claim units (see design 2026-07-16).
+CREATE TABLE IF NOT EXISTS certificates (
+  id SERIAL PRIMARY KEY,
+  account_id INT NOT NULL REFERENCES accounts(id),
+  product_id INT NOT NULL REFERENCES cd_products(id),
+  principal_cents BIGINT NOT NULL CHECK (principal_cents > 0),
+  rate_bps INT NOT NULL,
+  start_at TIMESTAMPTZ NOT NULL,
+  maturity_at TIMESTAMPTZ NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('open', 'pledged', 'matured', 'closed')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS credit_facilities (
+  id SERIAL PRIMARY KEY,
+  certificate_id INT NOT NULL UNIQUE REFERENCES certificates(id),
+  borrower_account_id INT NOT NULL REFERENCES accounts(id),
+  series_id TEXT NOT NULL UNIQUE,
+  limit_cents BIGINT NOT NULL CHECK (limit_cents > 0),
+  drawn_cents BIGINT NOT NULL DEFAULT 0 CHECK (drawn_cents >= 0),
+  holds_cents BIGINT NOT NULL DEFAULT 0 CHECK (holds_cents >= 0),
+  rate_bps INT NOT NULL,
+  ltv_bps INT NOT NULL CHECK (ltv_bps > 0 AND ltv_bps <= 10000),
+  status TEXT NOT NULL CHECK (status IN (
+    'pending', 'active', 'maturing', 'default', 'closed'
+  )),
+  maturity_at TIMESTAMPTZ NOT NULL,
+  on_chain_supply_cents BIGINT NOT NULL DEFAULT 0 CHECK (on_chain_supply_cents >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (drawn_cents + holds_cents <= limit_cents)
+);
+
+CREATE INDEX IF NOT EXISTS idx_credit_facilities_status
+  ON credit_facilities (status);
+CREATE INDEX IF NOT EXISTS idx_credit_facilities_borrower
+  ON credit_facilities (borrower_account_id);
+
+CREATE TABLE IF NOT EXISTS facility_presentments (
+  id SERIAL PRIMARY KEY,
+  facility_id INT NOT NULL REFERENCES credit_facilities(id),
+  amount_cents BIGINT NOT NULL CHECK (amount_cents > 0),
+  presenter_wallet TEXT NOT NULL,
+  presenter_name TEXT NOT NULL DEFAULT '',
+  cip_ref TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL CHECK (status IN (
+    'requested', 'drawn', 'paid', 'burned', 'failed', 'reconciled'
+  )),
+  draw_note TEXT,
+  payout_note TEXT,
+  burn_tx_hash TEXT,
+  failure_reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_facility_presentments_facility
+  ON facility_presentments (facility_id);
+CREATE INDEX IF NOT EXISTS idx_facility_presentments_status
+  ON facility_presentments (status);
+
+CREATE TABLE IF NOT EXISTS facility_events (
+  id SERIAL PRIMARY KEY,
+  facility_id INT NOT NULL REFERENCES credit_facilities(id),
+  kind TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_facility_events_facility
+  ON facility_events (facility_id);
+

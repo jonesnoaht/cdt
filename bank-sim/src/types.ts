@@ -74,3 +74,107 @@ export interface Balances {
   withdrawalsCents: number;
   balanceCents: number;
 }
+
+// --- Credit-claim facility (CD + secured LOC) ---
+
+export type CertificateStatus = "open" | "pledged" | "matured" | "closed";
+export type FacilityStatus =
+  | "pending"
+  | "active"
+  | "maturing"
+  | "default"
+  | "closed";
+export type FacilityPresentmentStatus =
+  | "requested"
+  | "drawn"
+  | "paid"
+  | "burned"
+  | "failed"
+  | "reconciled";
+
+export interface Certificate {
+  id: number;
+  accountId: number;
+  productId: number;
+  principalCents: number;
+  rateBps: number;
+  startAt: Date;
+  maturityAt: Date;
+  status: CertificateStatus;
+  createdAt: Date;
+}
+
+export interface CreditFacility {
+  id: number;
+  certificateId: number;
+  borrowerAccountId: number;
+  seriesId: string;
+  limitCents: number;
+  drawnCents: number;
+  holdsCents: number;
+  /** limit - drawn - holds */
+  availableCents: number;
+  rateBps: number;
+  ltvBps: number;
+  status: FacilityStatus;
+  maturityAt: Date;
+  /** Mirror of CDT supply for reconcile (core view). */
+  onChainSupplyCents: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface OpenFacilityInput {
+  accountId: number;
+  productId: number;
+  principalCents: number;
+  /** Default 9000 = 90%. */
+  ltvBps?: number;
+  /** LOC spread over CD rate; default 250. */
+  locSpreadBps?: number;
+  /** Depositor wallet that will receive minted CDT. */
+  depositorWallet: string;
+  /** Optional fixed clock for tests. */
+  now?: Date;
+}
+
+export interface FacilityPresentment {
+  id: number;
+  facilityId: number;
+  amountCents: number;
+  presenterWallet: string;
+  presenterName: string;
+  cipRef: string;
+  status: FacilityPresentmentStatus;
+  burnTxHash: string | null;
+  failureReason: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface RequestPresentmentInput {
+  facilityId: number;
+  amountCents: number;
+  presenterWallet: string;
+  presenterName?: string;
+  /** Demo CIP stub: non-empty means pass. */
+  cipRef: string;
+}
+
+export interface WaterfallResult {
+  facility: CreditFacility;
+  repaidLocCents: number;
+  paidCdtHoldersCents: number;
+  residualToDepositorCents: number;
+  proRata: boolean;
+}
+
+export interface ReissueInput {
+  facilityId: number;
+  newTermMonths: number;
+  newLtvBps?: number;
+  newLocSpreadBps?: number;
+  /** Must reflect current on-chain supply; reject if > new limit. */
+  currentOnChainSupplyCents: number;
+  now?: Date;
+}

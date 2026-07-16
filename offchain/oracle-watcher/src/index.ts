@@ -30,6 +30,16 @@ export {
   type VerifyPresentationResult,
   type WatcherLogger,
 } from './watcher.js';
+export {
+  reconcileSupply,
+  tickBurns,
+  tickFacilityWatcher,
+  tickMints,
+  type FacilityWatcherDeps,
+  type PaidUnburnedPresentment,
+  type ReconcileResult,
+  type UnmintedFacility,
+} from './facility-watcher.js';
 export { loadConfig, createPool, type OracleWatcherConfig, type PgConfig } from './config.js';
 export {
   createIdentity,

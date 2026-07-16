@@ -2,25 +2,31 @@
 
 **Author:** Noah Jones
 
-Tokenized certificates of deposit on Cardano, issued by a credit union and
-gated by W3C verifiable credentials.
+**Primary product (2026-07):** CD-collateralized **bearer credit claims** on Cardano —
+a pledged share certificate + secured LOC on the CU core; CDT units equal available
+credit; the depositor keeps the coupon; cash-out draws the depositor’s line.
+See [docs/superpowers/specs/2026-07-16-cdt-credit-claim-design.md](docs/superpowers/specs/2026-07-16-cdt-credit-claim-design.md)
+and [docs/product-position.md](docs/product-position.md).
 
 ## What is CDT?
 
 A certificate of deposit is a simple, well-understood financial product: a
 member locks a deposit at an insured institution for a fixed term at a fixed
-rate. CDT puts a verifiable, self-custodied representation of that contract
-on-chain — without moving the deposit itself.
+rate. **Credit-claim CDT** keeps that certificate on the books (coupon to the
+depositor) and issues a portable, freely transferable claim on a **secured
+line of credit** against it — so value can move in commerce without partially
+closing the CD.
 
-- **For members:** the CDT is a portable, cryptographically verifiable record
-  of their CD. They hold it in their own wallet, can prove ownership of it to
-  anyone, and redeem it on-chain at maturity for principal plus interest.
-- **For credit unions:** CDT is designed as a compliant on-ramp to digital
-  assets. The
-  deposit never leaves the insured institution — the token represents the CD
-  contract, not the money. Issuance is gated by a credential trust chain
-  rooted at the NCUA, so only verified members of insured institutions can
-  mint.
+- **For members (depositors):** open a facility, keep the CD yield, receive CDT
+  equal to available credit; understand that holders may present CDT and draw
+  *your* LOC.
+- **For holders / commerce:** accept and transfer CDT; cash-out is a banking
+  presentment (CIP/OFAC) that pays you and debits the original depositor.
+- **For credit unions:** core remains system of record (CD + LOC); chain carries
+  bearer units; oracle mints/burns against core state.
+
+Legacy vault “principal + interest redeem” demos may still exist under
+“Tokenize a CD (legacy)” but are not the product headline.
 
 The project originated in 2021 with pilot interest from CampusUSA Credit
 Union (see [History](#history)). This repository is a working local
