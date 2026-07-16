@@ -41,9 +41,86 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+/** Credit-claim facility (CD + secured LOC) API shapes. */
+export type FacilityDto = {
+  id: number;
+  certificateId: number;
+  borrowerAccountId: number;
+  seriesId: string;
+  limitCents: number;
+  drawnCents: number;
+  holdsCents: number;
+  availableCents: number;
+  rateBps: number;
+  ltvBps: number;
+  status: string;
+  maturityAt: string;
+  onChainSupplyCents: number;
+};
+
+export type FacilityPresentmentDto = {
+  id: number;
+  facilityId: number;
+  amountCents: number;
+  presenterWallet: string;
+  status: string;
+  burnTxHash: string | null;
+};
+
 export const api = {
   members: () => request<MemberDto[]>("/api/members"),
   products: () => request<ProductDto[]>("/api/products"),
+  openFacility: (body: {
+    accountId: number;
+    productId: number;
+    principalCents: number;
+    depositorWallet: string;
+    ltvBps?: number;
+    locSpreadBps?: number;
+  }) =>
+    request<FacilityDto>("/api/facilities", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  getFacility: (id: number) => request<FacilityDto>(`/api/facilities/${id}`),
+  requestFacilityPresentment: (
+    facilityId: number,
+    body: {
+      amountCents: number;
+      presenterWallet: string;
+      presenterName?: string;
+      cipRef: string;
+    },
+  ) =>
+    request<FacilityPresentmentDto>(`/api/facilities/${facilityId}/presentments`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  payFacilityPresentment: (id: number) =>
+    request<FacilityPresentmentDto>(`/api/presentments/${id}/pay`, { method: "POST" }),
+  burnFacilityPresentment: (id: number, burnTxHash: string) =>
+    request<FacilityPresentmentDto>(`/api/presentments/${id}/burn`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ burnTxHash }),
+    }),
+  facilityWaterfall: (id: number) =>
+    request<unknown>(`/api/facilities/${id}/waterfall`, { method: "POST" }),
+  facilityReissue: (
+    id: number,
+    body: {
+      newTermMonths: number;
+      currentOnChainSupplyCents: number;
+      newLtvBps?: number;
+    },
+  ) =>
+    request<FacilityDto>(`/api/facilities/${id}/reissue`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
   accounts: (memberId: number) => request<AccountDto[]>(`/api/members/${memberId}/accounts`),
   tokenizePrep: (memberId: number) =>
     request<TokenizePrepDto>(`/api/members/${memberId}/tokenize-prep`),

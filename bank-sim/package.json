@@ -13,6 +13,7 @@
     "db:down": "docker compose down -v",
     "db:apply": "tsx scripts/apply-schema.ts",
     "seed": "tsx scripts/seed.ts",
+    "demo:credit-claim": "tsx scripts/credit-claim-lifecycle.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

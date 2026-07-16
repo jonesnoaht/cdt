@@ -7,6 +7,9 @@ import { CdDetail } from "./pages/CdDetail.js";
 import { Dashboard } from "./pages/Dashboard.js";
 import { MemberPicker } from "./pages/MemberPicker.js";
 import { OpenCd } from "./pages/OpenCd.js";
+import { OpenFacility } from "./pages/OpenFacility.js";
+import { PresentFacility } from "./pages/PresentFacility.js";
+import { FacilityOps } from "./pages/FacilityOps.js";
 import { PresentForeign } from "./pages/PresentForeign.js";
 import { PaymentTerminal } from "./pages/PaymentTerminal.js";
 import { SignRequestPage } from "./pages/SignRequest.js";
@@ -19,18 +22,24 @@ type Route =
   | { page: "dashboard" }
   | { page: "cd"; txId: number }
   | { page: "open" }
+  | { page: "facility" }
+  | { page: "facility-present" }
+  | { page: "facility-ops" }
   | { page: "present" }
   | { page: "pay" }
   | { page: "sign"; requestId?: string }
   | { page: "about" };
 
 function parseRoute(hash: string): Route {
-  const path = hash.replace(/^#/, "");
+  const path = hash.replace(/^#/, "").split("?")[0] ?? "";
   const cd = path.match(/^\/cd\/(\d+)$/);
   if (cd) return { page: "cd", txId: Number(cd[1]) };
   const sign = path.match(/^\/sign(?:\/([a-f0-9]+))?$/i);
   if (sign) return { page: "sign", requestId: sign[1] };
   if (path === "/open") return { page: "open" };
+  if (path === "/facility") return { page: "facility" };
+  if (path === "/facility-present") return { page: "facility-present" };
+  if (path === "/facility-ops") return { page: "facility-ops" };
   if (path === "/present") return { page: "present" };
   if (path === "/pay") return { page: "pay" };
   if (path === "/about") return { page: "about" };
@@ -93,8 +102,17 @@ export function App() {
           <a href="#/" className={route.page === "dashboard" || route.page === "cd" ? "is-active" : ""}>
             Certificates
           </a>
+          <a href="#/facility" className={route.page === "facility" ? "is-active" : ""}>
+            Credit facility
+          </a>
+          <a
+            href="#/facility-present"
+            className={route.page === "facility-present" ? "is-active" : ""}
+          >
+            Facility cash-out
+          </a>
           <a href="#/open" className={route.page === "open" ? "is-active" : ""}>
-            Tokenize a CD
+            Tokenize a CD (legacy)
           </a>
           <a href="#/present" className={route.page === "present" ? "is-active" : ""}>
             Foreign CDT cash-out
@@ -128,6 +146,10 @@ export function App() {
           <About />
         ) : route.page === "present" ? (
           <PresentForeign />
+        ) : route.page === "facility-present" ? (
+          <PresentFacility />
+        ) : route.page === "facility-ops" ? (
+          <FacilityOps />
         ) : route.page === "pay" ? (
           <PaymentTerminal />
         ) : route.page === "sign" ? (
@@ -136,6 +158,8 @@ export function App() {
           <MemberPicker members={members} onSelect={selectMember} />
         ) : route.page === "cd" ? (
           <CdDetail member={member} txId={route.txId} />
+        ) : route.page === "facility" ? (
+          <OpenFacility member={member} />
         ) : route.page === "open" ? (
           <OpenCd member={member} />
         ) : (
@@ -146,9 +170,10 @@ export function App() {
       <footer className="footer">
         <p>
           Deposits are held at the credit union and federally insured by the NCUA up to
-          applicable limits. Certificate tokens are a record of ownership — your money never
-          leaves the credit union. Demonstration environment; not real accounts. Correspondent
-          cash advances against foreign CDTs are uninsured receivables until the issuer settles.
+          applicable limits. Primary product: credit-claim CDT (secured LOC against a pledged
+          certificate; coupon to depositor; cash-out draws the depositor’s line). Legacy vault
+          tokenize remains under “Tokenize a CD (legacy)”. Demonstration environment; not real
+          accounts.
         </p>
       </footer>
     </div>
